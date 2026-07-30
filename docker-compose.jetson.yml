@@ -1,0 +1,46 @@
+services:
+  object-action-detection:
+    image: oad-pipeline:jetson
+    build:
+      context: .
+      dockerfile: Dockerfile.jetson
+    container_name: oad-pipeline
+    runtime: nvidia            # NVIDIA Container Runtime injects the Tegra GPU + driver libs
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./config:/app/config
+      - ./templates:/app/templates
+      - ./src:/app/src
+      - ./logs:/app/logs
+      - ./videos:/app/videos
+      - ./rf_trained:/app/rf_trained
+      - model-cache:/root/.cache/ultralytics
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=all
+      - VIDEO_SOURCE=${VIDEO_SOURCE:-/app/videos/sample_video.mp4}
+      - MODEL_PATH=${MODEL_PATH:-rf_trained/weights.pt}
+      - MODEL_TYPE=${MODEL_TYPE:-yolo}
+      - TRACKER_TYPE=${TRACKER_TYPE:-botsort}
+      - CONFIDENCE_THRESHOLD=${CONFIDENCE_THRESHOLD:-0.5}
+      - PICK_DWELL_MS=${PICK_DWELL_MS:-200}
+      - PLACE_DWELL_MS=${PLACE_DWELL_MS:-500}
+      - FRAME_WIDTH=${FRAME_WIDTH:-1280}
+      - FRAME_HEIGHT=${FRAME_HEIGHT:-720}
+      - FPS=${FPS:-30}
+      - REALTIME=${REALTIME:-false}
+      - KDS_MODE=${KDS_MODE:-mock}
+      - OPTICAL_FLOW_ENABLED=${OPTICAL_FLOW_ENABLED:-true}
+      - LOG_METRICS_INTERVAL=${LOG_METRICS_INTERVAL:-5}
+      - LOG_LEVEL=${LOG_LEVEL:-WARNING}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/stats"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+volumes:
+  model-cache:

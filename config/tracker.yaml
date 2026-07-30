@@ -1,0 +1,52 @@
+# Tracker backend: botsort | bytetrack | deepsort
+tracker_type: bytetrack
+
+# Shared parameters (botsort / bytetrack)
+track_high_thresh: 0.5
+track_low_thresh: 0.05
+new_track_thresh: 0.6
+track_buffer: 300
+match_thresh: 0.5
+fuse_score: True
+
+# BoT-SORT specifics
+gmc_method: sparseOptFlow
+proximity_thresh: 0.5
+appearance_thresh: 0.75
+with_reid: False
+model: auto
+
+# DeepSORT specifics
+deepsort:
+  max_age: 50              # Frames to keep lost tracks alive
+  n_init: 3                # Consecutive detections to confirm a track
+  max_cosine_distance: 0.2 # Appearance matching threshold
+  nn_budget: 100            # Max feature vectors per track
+  embedder: null             # mobilenet | torchreid | clip_RN50 | clip_ViT-B/32 | null (IoU-only)
+  embedder_gpu: true        # Run embedder on GPU (false = CPU only)
+  half: true                # FP16 inference
+  bgr: true                 # Set false if frames are RGB
+
+# Optical flow co-motion analysis for pick confirmation
+optical_flow:
+  enabled: true                    # Set true to enable flow-augmented pick detection
+  method: "sparse_lk"              # sparse_lk | dis_fast | dis_ultrafast
+  max_corners: 100                 # Shi-Tomasi corners per ROI (sparse_lk only)
+  quality_level: 0.01              # Shi-Tomasi quality parameter
+  min_distance: 7                  # Min pixel distance between Shi-Tomasi corners
+  direction_threshold: 0.5         # Cosine similarity threshold for co-motion
+  magnitude_ratio_threshold: 0.3  # Min magnitude ratio for co-motion
+  flow_motion_threshold: 2.0       # Min flow magnitude (pixels) to count as motion
+  co_motion_dwell_ms: 200          # Reduced dwell when flow confirms contact
+  flow_contact_threshold: 2        # Consecutive contact frames needed for confirmation
+  lk_window_size: 21               # LK flow window size (odd number)
+  lk_max_level: 3                  # LK pyramid levels
+
+# Trajectory breadcrumb trail configuration for tracked hotdogs
+trajectory_trail:
+  enabled: true
+  maxlen: 60                      # Maximum centroid history points per track (e.g. ~2 sec at 30 fps)
+  smooth_alpha: 0.45              # Exponential smoothing factor (0.0 to 1.0)
+  anchor: "bottom_center"         # Centroid anchor: bottom_center | center
+  retain_lost_trails: true        # Retain trail history when track is lost until order reset
+  fade: true                      # Progressive opacity and thickness fading for older points

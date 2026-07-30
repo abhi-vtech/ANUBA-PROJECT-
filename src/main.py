@@ -1,0 +1,999 @@
+import json
+import logging
+import os
+import threading
+import time
+from pathlib import Path
+
+import cv2
+import numpy as np
+import uvicorn
+import yaml
+
+from src.capture import VideoCaptureThread
+from src.dashboard import add_event, app, update_frame_data
+from src.detector import Detector
+from src.flow import OpticalFlowAnalyzer
+from src.kds_client import DynamicKDSClient, MockKDSClient
+from src.paths import resource
+from src.schemas import HAND_CLASS, SAUCE_CLASSES, Action
+from src.state_machine import OrderStateMachine
+from src.hotdog_tracker import (
+    HotdogTracker,
+    _shrink_hand_bbox,
+    _hand_working_point,
+)
+from src.temporal import TemporalTracker
+from src.zones import ZoneManager
+
+metrics_logger = logging.getLogger("src.metrics")
+logger = logging.getLogger(__name__)
+
+
+def hex_to_bgr(hex_color):
+    """Convert hex color to BGR tuple for OpenCV."""
+    hex_color = hex_color.lstrip("#")
+    r = int(hex_color[0:2], 16)
+    g = int(hex_color[2:4], 16)
+    b = int(hex_color[4:6], 16)
+    return (b, g, r)
+
+
+def _boxes_overlap(bbox_a, bbox_b) -> bool:
+    """Return True when two bounding boxes (x1,y1,x2,y2) intersect."""
+    ax1, ay1, ax2, ay2 = bbox_a
+    bx1, by1, bx2, by2 = bbox_b
+    return ax1 < bx2 and ax2 > bx1 and ay1 < by2 and ay2 > by1
+
+
+# Per-class bounding box colors (BGR)
+CLASS_COLORS = {
+    "hand": (0, 255, 0),
+    "hot-dog": (0, 165, 255),
+    "ketchup_sauce": (0, 0, 255),
+    "yellow_mustard_sauce": (0, 255, 255),
+    "burger_bun": (255, 200, 0),
+    "french_fries": (255, 255, 0),
+}
+DEFAULT_BBOX_COLOR = (0, 255, 255)
+
+
+def _wrap_text(text, font, scale, thickness, max_width):
+    """Split text into lines that fit within max_width pixels."""
+    if not text:
+        return [text]
+    words = text.split(" ")
+    lines = []
+    current = words[0]
+    for word in words[1:]:
+        test = f"{current} {word}"
+        if cv2.getTextSize(test, font, scale, thickness)[0][0] <= max_width:
+            current = test
+        else:
+            lines.append(current)
+            current = word
+    lines.append(current)
+    return lines
+
+
+import random
+import time as _time_module
+from collections import deque
+from typing import Tuple
+
+_TRACK_COLORS: dict = {}
+
+# Standalone trail buffer: track_id -> canonical trail key (stable)
+# Completely independent of HotdogTracker — driven by raw YOLO track_id each frame.
+#
+# _TRAIL_KEY maps every seen track_id -> a stable "canonical key".
+# When a new track_id appears near a recently-lost trail, it inherits that
+# canonical key (and therefore that trail + color), so the line continues.
+_TRAIL_BUFFER: dict = {}      # canonical_key -> deque[dict]
+_TRAIL_LAST_SEEN: dict = {}   # canonical_key -> float (video time of last detection)
+_TRAIL_LAST_POS: dict = {}    # canonical_key -> (cx, cy)  last known centroid
+_TRAIL_KEY: dict = {}         # track_id -> canonical_key
+_TRAIL_MAXLEN = 1200          # ~50 seconds at 24 fps (persists whole assembly)
+_TRAIL_FADE_S = 10.0          # seconds to hold & fade trail after disappearance
+_TRAIL_DEADBAND_PX = 2        # skip jitter < 2px
+_TRAIL_LINK_DIST_PX = 400     # max centroid distance to inherit an existing trail (allows hand transfer across frame)
+_TRAIL_LINK_TIME_S = 8.0      # inherit trails lost within last 8 seconds (covers hand occlusion & transfer dwell)
+
+
+def _hsv_to_bgr(h_deg: float, s: float = 0.95, v: float = 1.0) -> Tuple[int, int, int]:
+    """Convert HSV color (Hue: 0..360, Saturation: 0..1, Value: 0..1) to OpenCV BGR."""
+    hsv_pixel = np.uint8([[[int((h_deg % 360.0) / 2.0), int(s * 255), int(v * 255)]]])
+    bgr = cv2.cvtColor(hsv_pixel, cv2.COLOR_HSV2BGR)[0][0]
+    return (int(bgr[0]), int(bgr[1]), int(bgr[2]))
+
+
+def _get_track_color(track_key) -> Tuple[int, int, int]:
+    key_str = str(track_key)
+    if key_str not in _TRACK_COLORS:
+        rng = random.Random(key_str)
+        hue = rng.uniform(0.0, 360.0)
+        _TRACK_COLORS[key_str] = _hsv_to_bgr(hue, s=0.95, v=1.0)
+    return _TRACK_COLORS[key_str]
+
+
+def _find_nearby_canonical(cx: float, cy: float, current_time: float, exclude_keys: set):
+    """Return the canonical key of the nearest recently-lost trail within linking range, or None."""
+    best_key = None
+    best_dist2 = _TRAIL_LINK_DIST_PX ** 2
+    for ckey, pos in _TRAIL_LAST_POS.items():
+        if ckey in exclude_keys:
+            continue
+        last_t = _TRAIL_LAST_SEEN.get(ckey, 0.0)
+        if (current_time - last_t) > _TRAIL_LINK_TIME_S:
+            continue  # Too old to link
+        dx = cx - pos[0]
+        dy = cy - pos[1]
+        d2 = dx * dx + dy * dy
+        if d2 < best_dist2:
+            best_dist2 = d2
+            best_key = ckey
+    return best_key
+
+
+def _update_trail_buffer(detections, current_time: float):
+    """Feed this frame's hotdog detections into _TRAIL_BUFFER with trail continuity."""
+    # Collect canonical keys active THIS frame so two detections can't both inherit the same trail
+    active_canonical_this_frame: set = set()
+
+    for det in detections:
+        if det.class_name != "hot-dog" or det.track_id is None:
+            continue
+        tid = det.track_id
+        x1, y1, x2, y2 = det.bbox
+        cx = (x1 + x2) / 2.0
+        cy = (y1 + y2) / 2.0
+
+        # Resolve canonical key for this track_id
+        if tid not in _TRAIL_KEY:
+            # New track_id: try to inherit a nearby trail that was recently lost
+            inherited = _find_nearby_canonical(cx, cy, current_time, active_canonical_this_frame)
+            if inherited is not None:
+                # Continue that trail under the new track_id
+                _TRAIL_KEY[tid] = inherited
+            else:
+                # Brand new location — start a fresh trail keyed by first track_id seen there
+                _TRAIL_KEY[tid] = tid
+                _TRAIL_BUFFER[tid] = deque(maxlen=_TRAIL_MAXLEN)
+
+        ckey = _TRAIL_KEY[tid]
+        active_canonical_this_frame.add(ckey)
+
+        # Ensure buffer exists (edge case: inherited key might not exist yet)
+        if ckey not in _TRAIL_BUFFER:
+            _TRAIL_BUFFER[ckey] = deque(maxlen=_TRAIL_MAXLEN)
+
+        buf = _TRAIL_BUFFER[ckey]
+        # Deadband: skip tiny jitter movements
+        if buf:
+            last = buf[-1]
+            dx, dy = cx - last["x"], cy - last["y"]
+            if (dx * dx + dy * dy) < _TRAIL_DEADBAND_PX ** 2:
+                _TRAIL_LAST_SEEN[ckey] = current_time
+                _TRAIL_LAST_POS[ckey] = (cx, cy)
+                continue
+
+        buf.append({"x": cx, "y": cy, "t": current_time})
+        _TRAIL_LAST_SEEN[ckey] = current_time
+        _TRAIL_LAST_POS[ckey] = (cx, cy)
+
+    # Purge canonical trails gone > _TRAIL_FADE_S seconds (clean up memory)
+    stale_keys = [
+        ckey for ckey, t in _TRAIL_LAST_SEEN.items()
+        if (current_time - t) > _TRAIL_FADE_S
+    ]
+    for ckey in stale_keys:
+        _TRAIL_BUFFER.pop(ckey, None)
+        _TRAIL_LAST_SEEN.pop(ckey, None)
+        _TRAIL_LAST_POS.pop(ckey, None)
+    # Clean up track_id -> key mappings for stale canonical keys
+    stale_set = set(stale_keys)
+    for tid in [t for t, k in _TRAIL_KEY.items() if k in stale_set]:
+        _TRAIL_KEY.pop(tid, None)
+
+
+def draw_annotations(frame, detections, zones, current_order):
+    h, w = frame.shape[:2]
+    for zone in zones.get_all():
+        poly = [(int(p[0] * w), int(p[1] * h)) for p in zone.polygon]
+        color = hex_to_bgr(zone.color)
+        cv2.polylines(frame, [np.array(poly)], True, color, 2)
+        xs = [p[0] for p in poly]
+        ys = [p[1] for p in poly]
+        zone_w = max(xs) - min(xs)
+        cx = sum(xs) // len(xs)
+        cy = sum(ys) // len(ys)
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        scale = 0.45
+        thickness = 2
+        max_text_w = max(zone_w - 8, 20)
+        lines = _wrap_text(zone.name, font, scale, thickness, max_text_w)
+        line_h = cv2.getTextSize("Ay", font, scale, thickness)[0][1]
+        pad = 6
+        total_h = len(lines) * (line_h + pad)
+        start_y = cy - total_h // 2 + line_h
+        for i, line in enumerate(lines):
+            tw = cv2.getTextSize(line, font, scale, thickness)[0][0]
+            lx = cx - tw // 2
+            ly = start_y + i * (line_h + pad)
+            cv2.rectangle(
+                frame, (lx - 2, ly - line_h - 2), (lx + tw + 2, ly + 4), (0, 0, 0), -1
+            )
+            cv2.putText(frame, line, (lx, ly), font, scale, color, thickness)
+
+    # ── Draw standalone track trails (pure YOLO track_id w/ continuity, no Re-ID) ──
+    current_time = getattr(draw_annotations, "_current_video_time", _time_module.time())
+    _update_trail_buffer(detections, current_time)
+
+    for ckey, buf in list(_TRAIL_BUFFER.items()):
+        pts = list(buf)
+        if len(pts) < 2:
+            continue
+        base_color = _get_track_color(ckey)
+        last_seen = _TRAIL_LAST_SEEN.get(ckey, current_time)
+        time_since = max(0.0, current_time - last_seen)
+
+        # 100% solid while active; fade to 0.0 over 10s after disappearance
+        alpha = max(0.0, 1.0 - (time_since / _TRAIL_FADE_S))
+        if alpha < 0.02:
+            continue
+
+        for i in range(1, len(pts)):
+            pt1 = (int(pts[i - 1]["x"]), int(pts[i - 1]["y"]))
+            pt2 = (int(pts[i]["x"]), int(pts[i]["y"]))
+            seg_color = (
+                int(base_color[0] * alpha),
+                int(base_color[1] * alpha),
+                int(base_color[2] * alpha),
+            )
+            cv2.line(frame, pt1, pt2, seg_color, 2, cv2.LINE_AA)
+
+        # Head dot at latest position
+        lx, ly = int(pts[-1]["x"]), int(pts[-1]["y"])
+        dot_color = (
+            int(base_color[0] * alpha),
+            int(base_color[1] * alpha),
+            int(base_color[2] * alpha),
+        )
+        cv2.circle(frame, (lx, ly), 5, dot_color, -1, cv2.LINE_AA)
+        cv2.circle(frame, (lx, ly), 7, (255, 255, 255), 1, cv2.LINE_AA)
+
+    hotdog_log = getattr(draw_annotations, "_hotdog_log_ref", {})
+
+    for det in detections:
+        x1, y1, x2, y2 = det.bbox
+        color = CLASS_COLORS.get(det.class_name, DEFAULT_BBOX_COLOR)
+
+        if det.class_name == "hot-dog":
+            # Match record in hotdog_log to find monotonic hotdog_id
+            matched_rec = None
+            if hasattr(det, 'track_id') and det.track_id in hotdog_log:
+                matched_rec = hotdog_log[det.track_id]
+            else:
+                # Find by closest bbox overlay
+                best_area = 0
+                for rec in hotdog_log.values():
+                    rx1, ry1, rx2, ry2 = rec.get("bbox", (0, 0, 0, 0))
+                    inter = max(0, min(x2, rx2) - max(x1, rx1)) * max(0, min(y2, ry2) - max(y1, ry1))
+                    if inter > best_area:
+                        best_area = inter
+                        matched_rec = rec
+
+            hid = matched_rec.get("hotdog_id") if matched_rec else getattr(det, "track_id", "?")
+            label_text = f"hotdog_{hid}"
+            if matched_rec and matched_rec.get("order_id"):
+                label_text += f" [{matched_rec['order_id']}]"
+
+            # Draw distinct hot-dog bounding box & label header
+            color = (0, 140, 255)  # Vibrant orange (BGR)
+            cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+
+            font = cv2.FONT_HERSHEY_SIMPLEX
+            font_scale = 0.55
+            thickness = 2
+            (text_w, text_h), _ = cv2.getTextSize(label_text, font, font_scale, thickness)
+
+            lbl_y1 = max(0, y1 - text_h - 10)
+            lbl_y2 = max(text_h + 10, y1)
+            cv2.rectangle(frame, (x1, lbl_y1), (x1 + text_w + 12, lbl_y2), (0, 0, 0), -1)
+            cv2.rectangle(frame, (x1, lbl_y1), (x1 + text_w + 12, lbl_y2), color, 2)
+
+            cv2.putText(
+                frame,
+                label_text,
+                (x1 + 6, lbl_y2 - 5),
+                font,
+                font_scale,
+                (255, 255, 255),
+                thickness,
+            )
+        else:
+            cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+            label_text = det.class_name
+            font = cv2.FONT_HERSHEY_SIMPLEX
+            font_scale = 0.50
+            thickness = 2
+            (text_w, text_h), _ = cv2.getTextSize(label_text, font, font_scale, thickness)
+
+            lbl_y1 = max(0, y1 - text_h - 10)
+            lbl_y2 = max(text_h + 10, y1)
+            cv2.rectangle(frame, (x1, lbl_y1), (x1 + text_w + 10, lbl_y2), (0, 0, 0), -1)
+            cv2.rectangle(frame, (x1, lbl_y1), (x1 + text_w + 10, lbl_y2), color, 1)
+
+            cv2.putText(
+                frame,
+                label_text,
+                (x1 + 5, lbl_y2 - 5),
+                font,
+                font_scale,
+                color,
+                thickness,
+            )
+
+        cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
+        cv2.circle(frame, (cx, cy), 5, color, -1)
+
+    return frame
+
+
+def _env(key, default=None, cast=None):
+    val = os.environ.get(key)
+    if val is None:
+        return default
+    if cast is not None:
+        return cast(val)
+    return val
+
+
+def main():
+    log_level = _env("LOG_LEVEL", "WARNING")
+    logging.basicConfig(
+        level=getattr(logging, log_level.upper(), logging.WARNING),
+        format="%(asctime)s %(name)s %(levelname)s: %(message)s",
+    )
+    logging.getLogger("src.temporal").setLevel(logging.DEBUG)
+    logging.getLogger("src.metrics").setLevel(logging.INFO)
+
+    # EXIT_ON_END: when set to "true", exit cleanly after the first video ends
+    # instead of looping through the video playlist.  Used by run_10min_video.py.
+    exit_on_end = str(_env("EXIT_ON_END", "false")).lower() in ("1", "true", "yes")
+
+    config = yaml.safe_load(Path(resource("config/model.yaml")).read_text())
+
+    source = _env("VIDEO_SOURCE") or config["source"]
+    model_path = _env("MODEL_PATH") or config.get("model_path", "yolov8n.pt")
+    model_type = _env("MODEL_TYPE") or config.get("model_type", "yolo")
+    tracker_type = _env("TRACKER_TYPE") or config.get("tracker_type", "botsort")
+    confidence = _env(
+        "CONFIDENCE_THRESHOLD", config.get("confidence_threshold", 0.5), float
+    )
+    pick_dwell = _env("PICK_DWELL_MS", config.get("pick_dwell_ms", 800), int)
+    place_dwell = _env("PLACE_DWELL_MS", config.get("place_dwell_ms", 500), int)
+    frame_w = _env("FRAME_WIDTH", config.get("frame_width"), int)
+    frame_h = _env("FRAME_HEIGHT", config.get("frame_height"), int)
+    fps = _env("FPS", config.get("fps"), int)
+    realtime = str(_env("REALTIME", config.get("realtime", "false"))).lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+    kds_mode = _env("KDS_MODE", config.get("kds_mode", "mock"))
+
+    metrics_interval = _env("LOG_METRICS_INTERVAL", 5, int)
+
+    metrics_logger.info(
+        json.dumps(
+            {
+                "event": "pipeline_start",
+                "source": source,
+                "model_path": model_path,
+                "model_type": model_type,
+                "tracker_type": tracker_type,
+                "confidence_threshold": confidence,
+                "pick_dwell_ms": pick_dwell,
+                "place_dwell_ms": place_dwell,
+                "frame_width": frame_w,
+                "frame_height": frame_h,
+                "fps": fps,
+                "kds_mode": kds_mode,
+            }
+        )
+    )
+
+    detector = Detector(
+        model_path,
+        secondary_model_path=config.get("secondary_model_path"),
+        prompt_classes=config.get("prompt_classes"),
+        model_type=model_type,
+        tracker_type=tracker_type,
+        tracker_config=resource("config/tracker.yaml"),
+    )
+    zones = ZoneManager(resource("config/zones.json"))
+
+    tracker_config = yaml.safe_load(Path(resource("config/tracker.yaml")).read_text())
+    flow_config = tracker_config.get("optical_flow", {})
+    flow_enabled_env = _env("OPTICAL_FLOW_ENABLED")
+    if flow_enabled_env is not None:
+        flow_config["enabled"] = flow_enabled_env.lower() in ("true", "1", "yes")
+
+    flow_analyzer = None
+    if flow_config.get("enabled", False):
+        flow_analyzer = OpticalFlowAnalyzer(
+            method=flow_config.get("method", "sparse_lk"),
+            max_corners=flow_config.get("max_corners", 100),
+            quality_level=flow_config.get("quality_level", 0.01),
+            min_distance=flow_config.get("min_distance", 7),
+            direction_threshold=flow_config.get("direction_threshold", 0.5),
+            magnitude_ratio_threshold=flow_config.get("magnitude_ratio_threshold", 0.3),
+            flow_motion_threshold=flow_config.get("flow_motion_threshold", 2.0),
+            lk_window_size=flow_config.get("lk_window_size", 21),
+            lk_max_level=flow_config.get("lk_max_level", 3),
+        )
+
+    temporal = TemporalTracker(
+        pick_dwell_ms=pick_dwell,
+        place_dwell_ms=place_dwell,
+        transition_timeout_ms=config.get("transition_timeout_ms", 2000),
+        carry_timeout_ms=config.get("carry_timeout_ms", 5000),
+        max_speed=config.get("max_speed", 2.0),
+        orphan_timeout_s=config.get("orphan_timeout_s", 5.0),
+        dedup_timeout_s=config.get("dedup_timeout_s", 0.3),
+        dedup_distance=config.get("dedup_distance", 0.05),
+        co_motion_dwell_ms=flow_config.get("co_motion_dwell_ms", 200),
+        flow_contact_threshold=flow_config.get("flow_contact_threshold", 2),
+    )
+    trail_cfg = tracker_config.get("trajectory_trail", {})
+    cfg_track_buffer = float(_env("HOTDOG_TRACK_BUFFER", tracker_config.get("track_buffer", 300)))
+    cfg_match_thresh = float(_env("HOTDOG_MATCH_THRESH", tracker_config.get("match_thresh", 0.5)))
+
+    # Convert track_buffer (frames) to orphan_timeout_s (seconds at ~30 FPS)
+    orphan_timeout_s = cfg_track_buffer / float(fps if fps else 30.0)
+
+    # ── Hotdog tracker (additive, does not modify core pipeline) ──────────
+    hotdog_tracker = HotdogTracker(
+        proximity_pad=int(_env("HOTDOG_PROXIMITY_PAD", 30)),
+        orphan_timeout_s=float(_env("HOTDOG_ORPHAN_TIMEOUT", orphan_timeout_s)),
+        spatial_lock_radius=float(_env("HOTDOG_SPATIAL_LOCK_RADIUS", 300.0)),
+        item_dwell_s=float(_env("HOTDOG_ITEM_DWELL_S",
+                                config.get("hotdog_item_dwell_s", 1.5))),
+        min_sauce_aspect=float(_env("HOTDOG_MIN_SAUCE_ASPECT",
+                                    config.get("hotdog_min_sauce_aspect_ratio", 1.2))),
+        min_sauce_height=int(_env("HOTDOG_MIN_SAUCE_HEIGHT_PX",
+                                   config.get("hotdog_min_sauce_height_px", 40))),
+        min_sauce_confidence=float(_env("HOTDOG_MIN_SAUCE_CONFIDENCE",
+                                        config.get("hotdog_min_sauce_confidence", 0.60))),
+        max_sauce_instances=int(_env("HOTDOG_MAX_SAUCE_INSTANCES",
+                                     config.get("hotdog_max_sauce_instances", 1))),
+        require_hand_proximity=bool(_env("HOTDOG_REQUIRE_HAND_PROXIMITY",
+                                         config.get("hotdog_require_hand_proximity", True))),
+        iou_threshold=cfg_match_thresh,
+        trail_maxlen=int(_env("TRAIL_MAXLEN", trail_cfg.get("maxlen", 60))),
+        trail_smooth_alpha=float(_env("TRAIL_SMOOTH_ALPHA", trail_cfg.get("smooth_alpha", 0.35))),
+        trail_anchor=_env("TRAIL_ANCHOR", trail_cfg.get("anchor", "bottom_center")),
+        retain_lost_trails=str(_env("RETAIN_LOST_TRAILS", trail_cfg.get("retain_lost_trails", True))).lower() in ("true", "1", "yes"),
+    )
+
+    if kds_mode == "dynamic":
+        zone_names = [z.name for z in zones.get_all() if z.zone_type == "bin"]
+        kds = DynamicKDSClient(
+            zone_names=zone_names,
+            min_items=config.get("kds_dynamic_min_items", 2),
+            max_items=config.get("kds_dynamic_max_items", 5),
+            interval_range=tuple(config.get("kds_dynamic_interval", [5, 15])),
+            max_tickets=config.get("kds_dynamic_max_tickets", 0),
+            seed=config.get("kds_dynamic_seed"),
+        )
+    else:
+        kds = MockKDSClient(
+            resource("config/kds_mock.json"), poll_interval=config.get("kds_poll", 2), loop=True
+        )
+    state_machine = OrderStateMachine(
+        history_path=config.get("kds_history"),
+    )
+    state_machine.set_kds_client(kds)
+
+    video_playlist = [
+        "videos/order1.mp4",
+        "videos/order2.mp4",
+        "videos/order3.mp4",
+        "videos/order4.mp4",
+        "videos/order5.mp4"
+    ]
+    current_video_idx = 0
+    try:
+        current_video_idx = video_playlist.index(source)
+    except ValueError:
+        pass
+
+    capture = VideoCaptureThread(
+        source,
+        target_width=frame_w,
+        target_height=frame_h,
+        fps=fps,
+        realtime=realtime,
+    )
+    capture.start()
+
+    from src import dashboard
+
+    dashboard.state_machine = state_machine
+
+    dashboard_thread = threading.Thread(
+        target=lambda: uvicorn.run(app, host="0.0.0.0", port=8000, log_level="warning"),
+        daemon=True,
+    )
+    dashboard_thread.start()
+
+    prev_gray = None
+    frame_count = 0
+    last_metrics_time = time.time()
+    pipeline_start_time = time.time()
+
+    _sauce_frames = {}
+    _sauce_applied = {}
+    _sauce_last_fired = {}
+    SAUCE_COOLDOWN_S = 0.7   # balanced cooldown for fast sauce passes
+    SAUCE_MIN_FRAMES = 1     # 1 frame accumulation for responsive detection
+
+    try:
+        while True:
+            loop_start = time.perf_counter()
+
+            if state_machine.current_ticket is None:
+                ticket = kds.get_next_ticket()
+                if ticket:
+                    state_machine.on_kds_ticket(ticket)
+
+            frame_item = capture.get_frame()
+            if frame_item is None:
+                time.sleep(0.01)
+                continue
+            frame, current_time = frame_item
+
+            # Force finished status 3.5 seconds before the video ends
+            if capture._is_file_source:
+                total_frames = capture.cap.get(cv2.CAP_PROP_FRAME_COUNT)
+                current_frame = capture.cap.get(cv2.CAP_PROP_POS_FRAMES)
+                video_fps = capture.cap.get(cv2.CAP_PROP_FPS)
+                if video_fps > 0 and total_frames > 0 and current_frame > 10:
+                    remaining_s = (total_frames - current_frame) / video_fps
+                    if remaining_s <= 0.5:
+                        if state_machine.current_order:
+                            state_machine.current_order.passed = True
+                            state_machine.current_order.ending_soon = True
+
+            if capture.consume_loop():
+                temporal.reset()
+                prev_gray = None
+                if state_machine.current_ticket is not None:
+                    state_machine.finalize_current_order()
+                # Clear sauce frame counters on video change
+                _sauce_frames.clear()
+                _sauce_applied.clear()
+                _sauce_last_fired.clear()
+
+                # ── EXIT_ON_END: stop after the video finishes ────────────
+                if exit_on_end:
+                    print(f"[INFO] Video finished — EXIT_ON_END=true, exiting.", flush=True)
+                    break
+
+                current_video_idx = (current_video_idx + 1) % len(video_playlist)
+                next_video = video_playlist[current_video_idx]
+                capture.change_source(next_video)
+
+
+            detect_start = time.perf_counter()
+            detections = detector.detect(frame, conf_threshold=confidence)
+            detect_ms = (time.perf_counter() - detect_start) * 1000.0
+
+            hand_detections = [d for d in detections if d.class_name == HAND_CLASS]
+
+            h, w = frame.shape[:2]
+
+            # ── Filter sauce detections for display & tracking ────────────────
+            # Sauce bottles are only shown on screen (and passed to the hotdog
+            # tracker) when they are in a valid position:
+            #   • Inside the sauce_vessel zone  (bottle resting — shown but no event)
+            #   • Inside the assembly zone       (being used — shown + event)
+            #   • Overlapping a food item bbox   (being applied — shown + event)
+            # Any other position (ingredient bins, right-side counter) is a
+            # false positive → removed from the visible list entirely.
+            _vessel_zones_vis = zones.get_zones_by_type("sauce_vessel")
+            _food_bboxes_vis  = [
+                d.bbox for d in detections
+                if d.class_name in {"hot-dog", "burger_bun", "french_fries"}
+            ]
+
+            def _sauce_is_visible(det) -> bool:
+                """Return True if this sauce detection should be shown/processed."""
+                if det.class_name not in SAUCE_CLASSES:
+                    return True  # non-sauce detections always visible
+                cx_n = ((det.bbox[0] + det.bbox[2]) / 2) / w
+                cy_n = ((det.bbox[1] + det.bbox[3]) / 2) / h
+                # Allow if inside vessel zone
+                if _vessel_zones_vis:
+                    for vz in _vessel_zones_vis:
+                        if cv2.pointPolygonTest(
+                            np.array(vz.polygon, dtype=np.float32),
+                            (cx_n, cy_n), False
+                        ) >= 0:
+                            return True
+                # Allow if in assembly zone
+                bz = zones.get_zone_for_bbox(det.bbox, w, h)
+                if bz is not None and bz.zone_type == "assembly":
+                    return True
+                # Allow if overlapping food
+                if any(_boxes_overlap(det.bbox, fb) for fb in _food_bboxes_vis):
+                    return True
+                return False  # suppress
+
+            visible_detections = [d for d in detections if _sauce_is_visible(d)]
+            # ─────────────────────────────────────────────────────────────────
+
+            flow_start = time.perf_counter()
+            flow_signals = None
+            if flow_analyzer is not None and prev_gray is not None:
+                curr_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                flow_signals = {}
+                for det in hand_detections:
+                    zone = zones.get_zone_for_bbox(det.bbox, w, h)
+                    if zone is not None and zone.zone_type == "bin":
+                        signal = flow_analyzer.compute_flow(
+                            prev_gray,
+                            curr_gray,
+                            det.bbox,
+                            zone.polygon,
+                            w,
+                            h,
+                        )
+                        flow_signals[det.track_id] = signal
+                prev_gray = curr_gray
+            elif flow_analyzer is not None:
+                prev_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            flow_ms = (time.perf_counter() - flow_start) * 1000.0
+
+            temporal_start = time.perf_counter()
+            actions = temporal.update(
+                hand_detections,
+                zones,
+                w,
+                h,
+                flow_signals,
+                current_time=current_time,
+            )
+            temporal_ms = (time.perf_counter() - temporal_start) * 1000.0
+
+            # ── Sauce detection ───────────────────────────────────────────────
+            # Spatial gate — three exclusive zones, no track_id state needed:
+            #
+            #   Zone A — sauce_vessel  (bottle resting on counter)
+            #     → bottle is identified/known here; no sauce event fired.
+            #
+            #   Zone B — assembly OR bbox overlaps a food item
+            #     → bottle is actively being applied → fire sauce action.
+            #
+            #   Anywhere else (ingredient bins, counter between A and B)
+            #     → suppress: this is a false positive or the bottle in transit.
+            #
+            # Robustness: purely positional, unaffected by tracker ID re-use.
+
+            for key, last_t in list(_sauce_last_fired.items()):
+                if (current_time - last_t) >= SAUCE_COOLDOWN_S:
+                    _sauce_applied[key] = False
+
+
+
+            # Vessel zones (may be empty list if operator hasn't drawn one yet)
+            vessel_zones = zones.get_zones_by_type("sauce_vessel")
+
+            # Food classes that qualify as "sauce being applied to food"
+            _FOOD_CLASSES = {"hot-dog", "burger_bun", "french_fries"}
+            food_bboxes = [d.bbox for d in detections if d.class_name in _FOOD_CLASSES]
+
+            # Reset per-class frame counters and session flags for sauce classes absent this frame
+            detected_sauce_classes = {
+                det.class_name for det in detections if det.class_name in SAUCE_CLASSES
+            }
+            for sc in list(_sauce_frames.keys()):
+                if sc not in detected_sauce_classes:
+                    del _sauce_frames[sc]
+                    # Clear all (sc, hotdog_tid) entries for this sauce class
+                    for k in list(_sauce_applied.keys()):
+                        if isinstance(k, tuple) and k[0] == sc:
+                            del _sauce_applied[k]
+
+
+            for det in detections:
+                if det.class_name not in SAUCE_CLASSES:
+                    continue
+
+                # Normalised centre of the sauce bottle bbox
+                cx_n = ((det.bbox[0] + det.bbox[2]) / 2) / w
+                cy_n = ((det.bbox[1] + det.bbox[3]) / 2) / h
+
+                # ── Zone A: bottle is resting in the vessel zone ──────────────
+                # Suppress — it's just sitting there.  Reset frame counter and session applied flag.
+                if vessel_zones:
+                    in_vessel = any(
+                        cv2.pointPolygonTest(
+                            np.array(vz.polygon, dtype=np.float32),
+                            (cx_n, cy_n),
+                            False,
+                        ) >= 0
+                        for vz in vessel_zones
+                    )
+                    if in_vessel:
+                        _sauce_frames[det.class_name] = 0
+                        # Clear per-hotdog applied flags for this sauce class on vessel return
+                        for k in list(_sauce_applied.keys()):
+                            if isinstance(k, tuple) and k[0] == det.class_name:
+                                del _sauce_applied[k]
+                        continue
+
+                # ── Zone C: somewhere on the counter but NOT assembly / food ──
+                # Suppress — false positive near ingredient bins, reflections,
+                # or bottle in mid-air transit not yet over food.
+                bottle_zone = zones.get_zone_for_bbox(det.bbox, w, h)
+                in_assembly  = (bottle_zone is not None and bottle_zone.zone_type == "assembly")
+                overlaps_food = any(_boxes_overlap(det.bbox, fb) for fb in food_bboxes)
+
+                if not in_assembly and not overlaps_food:
+                    _sauce_frames[det.class_name] = 0
+                    for k in list(_sauce_applied.keys()):
+                        if isinstance(k, tuple) and k[0] == det.class_name:
+                            del _sauce_applied[k]
+                    continue
+
+                # ── Zone B: bottle in assembly zone or directly over food ─────
+                # This is the application event — bottle is being used on food.
+                _sauce_frames[det.class_name] = (
+                    _sauce_frames.get(det.class_name, 0) + 1
+                )
+
+                # Frame accumulation check is still per sauce class (detector stability)
+                if (
+                    _sauce_frames[det.class_name] >= SAUCE_MIN_FRAMES
+                ):
+                    # ── Sauce attribution via Hand-as-Bridge ─────────────────────
+                    # Find the hand nearest to the sauce bottle (using the
+                    # shrunk palm/fingertip region so we only match the hand
+                    # actively holding the bottle, not a bystander hand).
+                    # From that hand's working point, resolve the specific
+                    # hotdog track_id being sauced — preventing blind
+                    # fire_count attribution across multiple hotdogs.
+                    bottle_wpt = _hand_working_point(det.bbox)
+
+                    nearest_sauce_hand = None
+                    nearest_sauce_hand_dist = float('inf')
+                    for hand_det in hand_detections:
+                        shx1, shy1, shx2, shy2 = _shrink_hand_bbox(hand_det.bbox)
+                        hpt_x = (shx1 + shx2) / 2.0
+                        hpt_y = float(shy2)
+                        d = ((bottle_wpt[0] - hpt_x) ** 2 + (bottle_wpt[1] - hpt_y) ** 2) ** 0.5
+                        if d < 250 and d < nearest_sauce_hand_dist:
+                            nearest_sauce_hand_dist = d
+                            nearest_sauce_hand = hand_det
+
+                    resolved_hotdog_tids: list = []
+                    if nearest_sauce_hand is not None:
+                        # Hand found — route sauce to the hotdog nearest that hand
+                        shx1, shy1, shx2, shy2 = _shrink_hand_bbox(nearest_sauce_hand.bbox)
+                        hand_pt_x = (shx1 + shx2) / 2.0
+                        hand_pt_y = float(shy2)
+                        best_sd = float('inf')
+                        best_s_tid = None
+                        for d in detections:
+                            if d.class_name != "hot-dog":
+                                continue
+                            rcx = (d.bbox[0] + d.bbox[2]) / 2.0
+                            rcy = (d.bbox[1] + d.bbox[3]) / 2.0
+                            dist = ((hand_pt_x - rcx) ** 2 + (hand_pt_y - rcy) ** 2) ** 0.5
+                            if dist < 350 and dist < best_sd:
+                                best_sd = dist
+                                best_s_tid = d.track_id
+                        if best_s_tid is not None:
+                            resolved_hotdog_tids = [best_s_tid]
+
+                    if not resolved_hotdog_tids:
+                        # No hand visible — fall back to old bbox-overlap logic
+                        hotdog_bboxes_under_bottle = [
+                            d.bbox for d in detections
+                            if d.class_name == "hot-dog"
+                            and _boxes_overlap(det.bbox, d.bbox)
+                        ]
+                        fire_count = max(1, len(hotdog_bboxes_under_bottle))
+                        resolved_hotdog_tids = [None] * fire_count
+
+                    for resolved_tid in resolved_hotdog_tids:
+                        # Per-hotdog cooldown: each (sauce_class, hotdog_tid) pair
+                        # tracks its own cooldown independently so two hotdogs in a
+                        # batch can each receive sauce without blocking each other.
+                        sauce_key = (det.class_name, resolved_tid)
+                        elapsed_for_hd = current_time - _sauce_last_fired.get(sauce_key, 0.0)
+                        if elapsed_for_hd >= SAUCE_COOLDOWN_S and not _sauce_applied.get(sauce_key, False):
+                            actions.append(
+                                Action(
+                                    track_id=det.track_id,
+                                    zone_id=bottle_zone.id if bottle_zone else "food_overlap",
+                                    zone_name=det.class_name,
+                                    action_type="sauce",
+                                    timestamp=current_time,
+                                )
+                            )
+                            _sauce_applied[sauce_key] = True
+                            _sauce_last_fired[sauce_key] = current_time
+                            logger.debug(
+                                "Sauce '%s' fired for hotdog tid=%s via hand-bridge",
+                                det.class_name, resolved_tid,
+                            )
+
+
+
+            # ── Wire pick/place/sauce actions → hotdog tracker (event-driven) ───
+            # TemporalTracker knows WHAT was picked and WHICH hand fired.
+            # Use the hand's working-point (bottom-centre of shrunk bbox) to find
+            # the nearest active hotdog ID and commit the item/sauce directly.
+            for action in actions:
+                if action.action_type in ("pick", "place", "sauce"):
+                    firing_hand = next(
+                        (h for h in hand_detections if h.track_id == action.track_id),
+                        hand_detections[0] if hand_detections else None,
+                    )
+                    if firing_hand is not None:
+                        hwpt = _hand_working_point(firing_hand.bbox)
+                        committed_tid = hotdog_tracker.force_commit_item(
+                            hand_working_pt=hwpt,
+                            item_class=action.zone_name,
+                            now=current_time,
+                            max_radius=300,
+                            is_sauce=(action.action_type == "sauce"),
+                        )
+                        if committed_tid is not None:
+                            logger.debug(
+                                "[action→hotdog] %s '%s' → hotdog #%d",
+                                action.action_type, action.zone_name, committed_tid,
+                            )
+
+            # ── State machine + dashboard events ─────────────────────────────────
+            for action in actions:
+                state_machine.on_action(action)
+
+                if action.action_type == "pickup":
+                    add_event(
+                        "pickup",
+                        zone=action.zone_id,
+                        item=action.zone_name,
+                        duration=action.duration_ms / 1000,
+                    )
+                elif action.action_type == "pick":
+                    add_event(
+                        "pick",
+                        zone=action.zone_id,
+                        item=action.zone_name,
+                        duration=action.duration_ms / 1000,
+                    )
+                elif action.action_type == "place":
+                    add_event(
+                        "place",
+                        zone=action.zone_id,
+                        item=action.zone_name,
+                        duration=action.duration_ms / 1000,
+                    )
+                elif action.action_type == "hover":
+                    add_event(
+                        "hover",
+                        zone=action.zone_id,
+                        item=action.zone_name,
+                        duration=action.duration_ms / 1000,
+                    )
+                elif action.action_type == "sauce":
+                    add_event(
+                        "sauce",
+                        item=action.zone_name,
+                    )
+
+
+            # ── Hotdog tracker update (ByteTrack + Monotonic IDs + POS Fusion) ──
+            active_ticket_id = state_machine.current_ticket.ticket_id if state_machine.current_ticket else None
+            hotdog_tracker.update(
+                detections,
+                current_time=current_time,
+                frame=frame,
+                active_ticket_id=active_ticket_id,
+            )
+
+            # POS / KDS Fusion Mismatch Validation (throttled alert)
+            if state_machine.current_ticket:
+                t_id = state_machine.current_ticket.ticket_id
+                exp_count = len(state_machine.current_ticket.expected_items)
+                h_log = hotdog_tracker.get_hotdog_log()
+                active_tracks = [
+                    rec for rec in h_log.values()
+                    if rec.get("order_id") == t_id or (rec.get("active") and rec.get("order_id") is None)
+                ]
+                vision_count = len(active_tracks)
+                if vision_count > exp_count:
+                    last_alert_t = getattr(main, "_last_pos_alert_t", {}).get(t_id, 0.0)
+                    if (current_time - last_alert_t) >= 5.0:
+                        if not hasattr(main, "_last_pos_alert_t"):
+                            main._last_pos_alert_t = {}
+                        main._last_pos_alert_t[t_id] = current_time
+                        logger.warning(
+                            "[POS_FUSION_ALERT] Ticket %s expects %d items, but vision tracked %d active items!",
+                            t_id, exp_count, vision_count
+                        )
+
+            detection_counts = {}
+            for det in visible_detections:
+                detection_counts[det.class_name] = (
+                    detection_counts.get(det.class_name, 0) + 1
+                )
+
+            draw_annotations._hotdog_log_ref = hotdog_tracker.get_hotdog_log()
+            draw_annotations._current_video_time = current_time
+            annotated = draw_annotations(
+                frame.copy(), visible_detections, zones, state_machine.get_current_order()
+            )
+            update_frame_data(
+                annotated,
+                state_machine.current_ticket,
+                state_machine.get_current_order(),
+                state_machine.get_stats(),
+                detections=detection_counts,
+                validation_log=state_machine.get_validation_log(),
+                track_states=temporal.get_track_states(),
+                hotdog_log=hotdog_tracker.get_hotdog_log(),
+            )
+
+            loop_ms = (time.perf_counter() - loop_start) * 1000.0
+            frame_count += 1
+
+            now = time.time()
+            if now - last_metrics_time >= metrics_interval:
+                elapsed = now - pipeline_start_time
+                fps_actual = frame_count / elapsed if elapsed > 0 else 0
+                stats = state_machine.get_stats()
+                metrics_logger.info(
+                    json.dumps(
+                        {
+                            "event": "metrics",
+                            "fps": round(fps_actual, 2),
+                            "frame_count": frame_count,
+                            "elapsed_s": round(elapsed, 1),
+                            "loop_ms": round(loop_ms, 2),
+                            "detect_ms": round(detect_ms, 2),
+                            "flow_ms": round(flow_ms, 2),
+                            "temporal_ms": round(temporal_ms, 2),
+                            "detections": detection_counts,
+                            "total_orders": stats.total_orders,
+                            "passed_orders": stats.passed_orders,
+                            "failed_orders": stats.failed_orders,
+                            "accuracy_pct": stats.accuracy_pct,
+                            "error_rate_pct": stats.error_rate_pct,
+                        }
+                    )
+                )
+                last_metrics_time = now
+    except KeyboardInterrupt:
+        pass
+    finally:
+        # ── Emit final hotdog summary as a JSON event (additive) ──────────
+        try:
+            metrics_logger.info(
+                json.dumps({
+                    "event": "hotdog_summary",
+                    "hotdog_log": hotdog_tracker.get_summary(),
+                })
+            )
+        except Exception:
+            pass
+        state_machine.save_history()
+        capture.release()
+
+
+if __name__ == "__main__":
+    main()

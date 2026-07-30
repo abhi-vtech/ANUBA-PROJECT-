@@ -1,0 +1,34 @@
+source: videos/order2.mp4
+
+model_type: yolo
+model_path: rf_trained/weights.pt
+secondary_model_path:        # disabled: models/weights.pt not present; run on primary model only
+tracker_type: bytetrack
+
+
+pick_dwell_ms: 800   # how long (ms) a hand must be in the pick zone before we consider it a pick
+place_dwell_ms: 500
+hotdog_item_dwell_s: 0.5  # seconds an item must continuously overlap a hotdog before it is recorded as picked
+# Hand-presence gate: only commit a topping when a hand is simultaneously
+# detected over the hotdog.  Prevents the onion tray (statically near the
+# hotdog) from triggering false picks just because its bbox overlaps.
+hotdog_require_hand_proximity: true  # set false to disable the gate entirely
+hotdog_hand_pad_px: 50               # extra px around hotdog bbox when checking for a hand
+# Sauce bottle shape filter — rejects wide/flat objects (lids, containers)
+# that the model misclassifies as ketchup_sauce / yellow_mustard_sauce.
+# A real bottle is tall & narrow: height/width ratio well above 1.
+hotdog_min_sauce_aspect_ratio: 0.8   # h/w minimum — allows tilted squeeze bottles during pouring
+hotdog_min_sauce_height_px: 30       # absolute minimum bbox height in pixels
+hotdog_min_sauce_confidence: 0.35    # confidence floor for sauce detections (lowered from 1.0)
+hotdog_max_sauce_instances: 1        # max ketchup/mustard detections per frame (keeps highest-confidence only)
+transition_timeout_ms: 2000
+max_speed: 2.0
+dedup_timeout_s: 0.3
+dedup_distance: 0.05
+frame_width: 1280
+frame_height: 720
+fps: 30
+confidence_threshold: 0.5
+kds_mode: mock              # mock | dynamic
+kds_poll: 2                 # seconds between ticket polls (mock mode)
+kds_history: output/orders.jsonl

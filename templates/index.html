@@ -1,0 +1,1576 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="utf-8">
+    <title>Anuba Technologies - Order Accuracy Dashboard</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        html,
+        body {
+            font-family: 'Outfit', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #0c101b;
+            color: #d1d5db;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* Top Bar red-brand theme */
+        .top-bar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: #111827;
+            padding: 10px 20px;
+            border-bottom: 1px solid #1f2937;
+            height: 60px;
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .logo img {
+            height: 40px;
+            object-fit: contain;
+        }
+
+        .logo-text {
+            font-weight: 800;
+            font-size: 20px;
+            color: #ef4444;
+            letter-spacing: -0.5px;
+            font-style: italic;
+        }
+
+        .status-pills {
+            display: flex;
+            gap: 16px;
+            align-items: center;
+        }
+
+        .pill {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 13px;
+            color: #9ca3af;
+            background: #1f2937;
+            padding: 6px 12px;
+            border-radius: 6px;
+            border: 1px solid #374151;
+        }
+
+        .pill .label {
+            color: #9ca3af;
+            font-weight: 500;
+        }
+
+        .pill .value {
+            color: #fff;
+            font-weight: 700;
+        }
+
+        .live-dot {
+            width: 8px;
+            height: 8px;
+            background: #22c55e;
+            border-radius: 50%;
+            display: inline-block;
+            box-shadow: 0 0 8px #22c55e;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.4; transform: scale(0.85); }
+        }
+
+        /* Right-Side Header Badges */
+        .header-badges {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .floating-active-badge {
+            background: rgba(16, 185, 129, 0.1);
+            border: 1px solid #10b981;
+            padding: 6px 14px;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 700;
+            color: #10b981;
+            text-align: center;
+            text-transform: uppercase;
+        }
+
+        .overall-result-box {
+            background: #1f2937;
+            border: 1px solid #374151;
+            border-radius: 6px;
+            padding: 6px 16px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-width: 130px;
+        }
+
+        .overall-result-box .label {
+            font-size: 9px;
+            color: #9ca3af;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            font-weight: 600;
+        }
+
+        .overall-result-box .status {
+            font-size: 16px;
+            font-weight: 800;
+            color: #10b981;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .overall-result-box .status.fail {
+            color: #ef4444;
+        }
+
+        .overall-result-box .status.pending {
+            color: #f59e0b;
+        }
+
+        /* Dashboard Main Layout */
+        .dashboard-container {
+            display: grid;
+            grid-template-columns: 290px 1fr 320px;
+            height: calc(100vh - 60px);
+            background: #0c101b;
+        }
+
+        /* Columns styling */
+        .sidebar-left {
+            border-right: 1px solid #1f2937;
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+            overflow: hidden;
+            background: #111827;
+        }
+
+        .main-center {
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+            overflow-y: auto;
+            padding: 16px;
+            gap: 16px;
+        }
+
+        .sidebar-right {
+            border-left: 1px solid #1f2937;
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+            overflow-y: auto;
+            background: #111827;
+            padding: 16px;
+            gap: 16px;
+        }
+
+        /* Scrollbars */
+        .scrollable::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        .scrollable::-webkit-scrollbar-track {
+            background: #111827;
+        }
+        .scrollable::-webkit-scrollbar-thumb {
+            background: #374151;
+            border-radius: 3px;
+        }
+        .scrollable::-webkit-scrollbar-thumb:hover {
+            background: #4b5563;
+        }
+
+        /* Left Sidebar Panels */
+        .sidebar-panel {
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .kds-panel {
+            flex: 1;
+            border-bottom: 1px solid #1f2937;
+        }
+
+        .events-panel {
+            flex: 1;
+            padding: 0 14px 14px 14px;
+        }
+
+        .panel-title {
+            font-size: 12px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: #9ca3af;
+            padding: 14px 14px 10px 14px;
+        }
+
+        /* Tabs styling */
+        .kds-tabs {
+            display: flex;
+            gap: 4px;
+            padding: 0 14px 10px 14px;
+            border-bottom: 1px solid #1f2937;
+        }
+
+        .kds-tab {
+            font-size: 11px;
+            font-weight: 600;
+            color: #9ca3af;
+            background: #1f2937;
+            border: 1px solid #374151;
+            padding: 6px 8px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        .kds-tab.active {
+            background: #374151;
+            color: #fff;
+            border-color: #4b5563;
+        }
+
+        /* KDS Cards List */
+        .kds-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 12px 14px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .kds-card {
+            background: #1f2937;
+            border: 1px solid #374151;
+            border-radius: 6px;
+            padding: 12px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            position: relative;
+        }
+
+        .kds-card:hover {
+            border-color: #4b5563;
+            background: #253041;
+        }
+
+        .kds-card.selected {
+            border-color: #ef4444;
+            box-shadow: 0 0 0 1px #ef4444;
+        }
+
+        .kds-card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .kds-card-id {
+            font-size: 14px;
+            font-weight: 800;
+            color: #fff;
+        }
+
+        .kds-badge {
+            font-size: 9px;
+            font-weight: 700;
+            text-transform: uppercase;
+            padding: 3px 6px;
+            border-radius: 4px;
+        }
+
+        .kds-badge.overdue { background: rgba(239, 68, 68, 0.15); color: #ef4444; border: 1px solid rgba(239, 68, 68, 0.3); }
+        .kds-badge.inprogress { background: rgba(59, 130, 246, 0.15); color: #3b82f6; border: 1px solid rgba(59, 130, 246, 0.3); }
+        .kds-badge.completed { background: rgba(16, 185, 129, 0.15); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.3); }
+        .kds-badge.incompleted { background: rgba(245, 158, 11, 0.15); color: #f59e0b; border: 1px solid rgba(245, 158, 11, 0.3); }
+
+        .kds-card-items {
+            font-size: 11px;
+            color: #9ca3af;
+            line-height: 1.4;
+            margin-bottom: 8px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .kds-card-footer {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 11px;
+            color: #6b7280;
+        }
+
+        .kds-card-time {
+            position: absolute;
+            top: 12px;
+            right: 12px;
+            font-size: 10px;
+            color: #6b7280;
+        }
+
+        .kds-card-metadata {
+            display: flex;
+            gap: 12px;
+        }
+
+        /* Live Event Item */
+        .event-item {
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+            padding: 8px 0;
+            border-bottom: 1px solid #1f2937;
+            font-size: 12px;
+        }
+
+        .event-item:last-child {
+            border-bottom: none;
+        }
+
+        .event-time {
+            color: #6b7280;
+            font-weight: 500;
+        }
+
+        .event-desc {
+            flex: 1;
+            color: #d1d5db;
+        }
+
+        .event-desc .zone { color: #3b82f6; font-weight: 500; }
+        .event-desc .highlight { color: #10b981; font-weight: 500; }
+
+        .event-check {
+            color: #10b981;
+            font-weight: 700;
+        }
+
+        /* Center Section: Stream & Recent Orders Table */
+        .video-panel {
+            background: #111827;
+            border: 1px solid #1f2937;
+            border-radius: 8px;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .video-header {
+            padding: 12px 16px;
+            background: #1f2937;
+            border-bottom: 1px solid #374151;
+            font-size: 14px;
+            font-weight: 700;
+            color: #fff;
+        }
+
+        .video-container {
+            width: 100%;
+            position: relative;
+            background: #000;
+            aspect-ratio: 16/9;
+        }
+
+        .video-container img {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+        }
+
+        /* Recent Orders History Table */
+        .history-panel {
+            background: #111827;
+            border: 1px solid #1f2937;
+            border-radius: 8px;
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .history-title-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .history-title {
+            font-size: 13px;
+            font-weight: 700;
+            text-transform: uppercase;
+            color: #9ca3af;
+        }
+
+        .history-link {
+            font-size: 11px;
+            color: #ef4444;
+            text-decoration: none;
+            font-weight: 600;
+        }
+
+        .history-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 12px;
+            text-align: left;
+        }
+
+        .history-table th {
+            color: #6b7280;
+            font-weight: 600;
+            padding: 8px 12px;
+            border-bottom: 1px solid #1f2937;
+            text-transform: uppercase;
+            font-size: 10px;
+        }
+
+        .history-table td {
+            padding: 10px 12px;
+            border-bottom: 1px solid #1f2937;
+            color: #d1d5db;
+        }
+
+        .history-table tr:last-child td {
+            border-bottom: none;
+        }
+
+        .history-status-badge {
+            font-size: 9px;
+            font-weight: 700;
+            padding: 3px 8px;
+            border-radius: 4px;
+            text-transform: uppercase;
+            display: inline-block;
+        }
+
+        .history-status-badge.completed { background: rgba(16, 185, 129, 0.15); color: #10b981; }
+        .history-status-badge.inprogress { background: rgba(59, 130, 246, 0.15); color: #3b82f6; }
+        .history-status-badge.incompleted { background: rgba(239, 68, 68, 0.15); color: #ef4444; }
+
+        /* Right Sidebar Panel: Performance Analytics */
+        .analytics-title {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 12px;
+            font-weight: 700;
+            color: #9ca3af;
+            text-transform: uppercase;
+        }
+
+        .analytics-title select {
+            background: #1f2937;
+            color: #fff;
+            border: 1px solid #374151;
+            font-size: 11px;
+            padding: 4px 8px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        /* Metric Grid layout */
+        .metric-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 8px;
+            margin-top: 10px;
+        }
+
+        .metric-card {
+            background: #1f2937;
+            border: 1px solid #374151;
+            border-radius: 6px;
+            padding: 10px 6px;
+            text-align: center;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
+
+        .metric-label {
+            font-size: 9px;
+            color: #9ca3af;
+            font-weight: 500;
+            margin-bottom: 4px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .metric-value {
+            font-size: 16px;
+            font-weight: 800;
+            color: #fff;
+        }
+
+        .metric-card.accuracy .metric-value { color: #10b981; }
+        .metric-card.errors .metric-value { color: #ef4444; }
+
+        /* Donut Chart block */
+        .chart-panel {
+            background: #1f2937;
+            border: 1px solid #374151;
+            border-radius: 8px;
+            padding: 14px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .chart-panel-title {
+            font-size: 12px;
+            font-weight: 700;
+            color: #9ca3af;
+        }
+
+        .chart-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .donut-container {
+            position: relative;
+            width: 100px;
+            height: 100px;
+        }
+
+        .donut-svg {
+            transform: rotate(-90deg);
+        }
+
+        .donut-bg {
+            fill: none;
+            stroke: #374151;
+            stroke-width: 8;
+        }
+
+        .donut-fg {
+            fill: none;
+            stroke-width: 8;
+            stroke-dasharray: 251.2;
+            stroke-dashoffset: 0;
+            transition: stroke-dashoffset 0.35s ease;
+        }
+
+        .donut-text-center {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+        }
+
+        .donut-val {
+            font-size: 14px;
+            font-weight: 800;
+            color: #fff;
+        }
+
+        .donut-lbl {
+            font-size: 8px;
+            color: #9ca3af;
+        }
+
+        .chart-legend {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            flex: 1;
+            padding-left: 16px;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            font-size: 11px;
+        }
+
+        .legend-left {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            color: #d1d5db;
+        }
+
+        .legend-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+        }
+
+        .legend-right {
+            font-weight: 700;
+            color: #fff;
+        }
+
+        /* Error Types panel */
+        .errors-panel-right {
+            background: #1f2937;
+            border: 1px solid #374151;
+            border-radius: 8px;
+            padding: 14px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .errors-title {
+            font-size: 12px;
+            font-weight: 700;
+            color: #9ca3af;
+            text-transform: uppercase;
+        }
+
+        .error-row {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .error-meta {
+            display: flex;
+            justify-content: space-between;
+            font-size: 11px;
+            color: #d1d5db;
+        }
+
+        .error-bar-bg {
+            height: 6px;
+            background: #374151;
+            border-radius: 3px;
+            overflow: hidden;
+        }
+
+        .error-bar-fg {
+            height: 100%;
+            border-radius: 3px;
+            transition: width 0.35s ease;
+        }
+
+        .footer-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 11px;
+            color: #6b7280;
+            margin-top: 10px;
+        }
+        /* ══════════════════════════════════════════════════════════
+           Hotdog Tracker Panel (additive)
+        ════════════════════════════════════════════════════════════ */
+        .hotdog-tracker-panel {
+            background: #1a1f2e;
+            border: 1px solid #374151;
+            border-radius: 8px;
+            padding: 14px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .hotdog-tracker-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .hotdog-tracker-title {
+            font-size: 12px;
+            font-weight: 700;
+            color: #9ca3af;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .hotdog-count-badge {
+            background: rgba(249, 115, 22, 0.15);
+            border: 1px solid rgba(249, 115, 22, 0.4);
+            color: #f97316;
+            font-size: 11px;
+            font-weight: 800;
+            padding: 3px 10px;
+            border-radius: 12px;
+        }
+
+        .hotdog-log-scroll {
+            max-height: 260px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .hotdog-log-scroll::-webkit-scrollbar { width: 4px; }
+        .hotdog-log-scroll::-webkit-scrollbar-track { background: #111827; }
+        .hotdog-log-scroll::-webkit-scrollbar-thumb { background: #374151; border-radius: 2px; }
+
+        .hotdog-entry {
+            background: #111827;
+            border: 1px solid #1f2937;
+            border-left: 3px solid #f97316;
+            border-radius: 6px;
+            padding: 8px 10px;
+            font-size: 11px;
+        }
+
+        .hotdog-entry.active {
+            border-left-color: #22c55e;
+            background: rgba(34, 197, 94, 0.04);
+        }
+
+        .hotdog-entry-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 5px;
+        }
+
+        .hotdog-entry-id {
+            font-weight: 800;
+            color: #fff;
+            font-size: 12px;
+        }
+
+        .hotdog-status-pill {
+            font-size: 9px;
+            font-weight: 700;
+            padding: 2px 6px;
+            border-radius: 8px;
+            text-transform: uppercase;
+        }
+
+        .hotdog-status-pill.active-pill {
+            background: rgba(34, 197, 94, 0.15);
+            color: #22c55e;
+            border: 1px solid rgba(34, 197, 94, 0.3);
+        }
+
+        .hotdog-status-pill.idle-pill {
+            background: rgba(107, 114, 128, 0.15);
+            color: #6b7280;
+            border: 1px solid rgba(107, 114, 128, 0.3);
+        }
+
+        .hotdog-item-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 2px 0;
+            border-bottom: 1px solid rgba(55, 65, 81, 0.4);
+        }
+
+        .hotdog-item-row:last-child { border-bottom: none; }
+
+        .hotdog-item-name {
+            color: #d1d5db;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .hotdog-item-name::before {
+            content: '✓';
+            color: #22c55e;
+            font-weight: 700;
+            font-size: 10px;
+        }
+
+        .hotdog-item-time {
+            color: #6b7280;
+            font-size: 10px;
+        }
+
+        .hotdog-empty-msg {
+            color: #4b5563;
+            font-style: italic;
+            font-size: 10px;
+        }
+
+        .hotdog-json-pre {
+            background: #0d1117;
+            border: 1px solid #1f2937;
+            border-radius: 4px;
+            padding: 8px;
+            font-size: 9px;
+            color: #6ee7b7;
+            overflow-x: auto;
+            white-space: pre;
+            max-height: 120px;
+            overflow-y: auto;
+            font-family: 'Courier New', monospace;
+        }
+    </style>
+</head>
+
+<body>
+
+    <!-- Top Bar -->
+    <div class="top-bar">
+        <div class="logo">
+            <img src="/logo_italic.png" onerror="this.src='/anuba_logo_icon.jpg'; this.onerror=null;" alt="Anuba Technologies">
+        </div>
+
+        <div class="status-pills">
+            <div class="pill">
+                <span class="label">FPS</span>
+                <span class="value" id="fps">5</span>
+            </div>
+            <div class="pill">
+                <span class="live-dot"></span>
+                <span class="value">Live</span>
+            </div>
+            <div class="pill">
+                <span class="label">Station</span>
+                <span class="value">WS #1</span>
+            </div>
+            <div class="pill">
+                <span class="label">Time</span>
+                <span class="value" id="current-time">11:51:00 AM</span>
+            </div>
+            <div class="pill">
+                <span class="label">Mode</span>
+                <span class="value">Live Tracking</span>
+            </div>
+        </div>
+
+        <div class="header-badges">
+            <div class="overall-result-box">
+                <span class="label">Overall Result</span>
+                <div class="status" id="overall-status-badge">
+                    <span>WAITING</span><span>&#9711;</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Container -->
+    <div class="dashboard-container">
+        <!-- Left Sidebar -->
+        <div class="sidebar-left">
+            <div class="sidebar-panel kds-panel">
+                <div class="panel-title">Kitchen Display System (KDS)</div>
+                <div class="kds-tabs">
+                    <div class="kds-tab active" id="tab-all">All (0)</div>
+                    <div class="kds-tab" id="tab-new">New (0)</div>
+                    <div class="kds-tab" id="tab-progress">In Progress (0)</div>
+                    <div class="kds-tab" id="tab-completed">Completed (0)</div>
+                </div>
+                <div class="kds-list scrollable" id="kds-queue-list">
+                    <div style="color: #6b7280; font-size: 11px; padding: 12px; text-align: center;">No orders in queue</div>
+                </div>
+            </div>
+
+            <div class="sidebar-panel events-panel">
+                <div class="panel-title" style="padding: 14px 0 10px 0;">ingredients adding</div>
+                <div class="scrollable" style="flex: 1; overflow-y: auto;" id="added-items-container">
+                    <ul id="added-items-list" style="list-style: none; display: flex; flex-direction: column; gap: 8px; padding: 0;">
+                        <li style="color: #6b7280; font-size: 11px; text-align: center; padding-top: 12px;">Waiting for KDS ticket...</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <!-- Center Column -->
+        <div class="main-center scrollable" style="justify-content: center; align-items: center; display: flex; padding: 16px;">
+            <div class="video-panel" style="width: 100%; max-width: 1080px; margin: auto;">
+                <div class="video-header" id="video-feed-title" style="display: none;">Ticket: Waiting...</div>
+                <div class="video-container">
+                    <img src="/video" alt="Camera Feed">
+                </div>
+            </div>
+        </div>
+
+        <!-- Right Sidebar -->
+        <div class="sidebar-right scrollable">
+            <div class="analytics-title">
+                <span>Performance Analytics</span>
+                <select>
+                    <option>Today</option>
+                    <option>Weekly</option>
+                </select>
+            </div>
+
+            <!-- Metric Grid -->
+            <div class="metric-grid" style="grid-template-columns: repeat(3, 1fr);">
+                <div class="metric-card">
+                    <span class="metric-label">Total Orders</span>
+                    <span class="metric-value" id="metric-total">0</span>
+                </div>
+                <div class="metric-card">
+                    <span class="metric-label">Completed</span>
+                    <span class="metric-value" id="metric-completed">0</span>
+                </div>
+                <div class="metric-card">
+                    <span class="metric-label">Avg Prep Time</span>
+                    <span class="metric-value">2m 34s</span>
+                </div>
+            </div>
+
+            <!-- Donut Chart -->
+            <div class="chart-panel">
+                <span class="chart-panel-title">Order Accuracy</span>
+                <div class="chart-row">
+                    <div class="donut-container">
+                        <svg class="donut-svg" width="100" height="100" viewBox="0 0 100 100">
+                            <circle class="donut-bg" cx="50" cy="50" r="40"></circle>
+                            <circle class="donut-fg" id="donut-circle" cx="50" cy="50" r="40"></circle>
+                        </svg>
+                        <div class="donut-text-center">
+                            <span class="donut-val" id="donut-val-text">0.0</span>
+                            <span class="donut-lbl">Accuracy</span>
+                        </div>
+                    </div>
+                    <div class="chart-legend">
+                        <div class="legend-item">
+                            <div class="legend-left">
+                                <div class="legend-dot" style="background: #10b981;"></div>
+                                <span>Correct Orders</span>
+                            </div>
+                            <span class="legend-right" id="legend-correct-text">0</span>
+                        </div>
+                        <div class="legend-item">
+                            <div class="legend-left">
+                                <div class="legend-dot" style="background: #ef4444;"></div>
+                                <span>Errors</span>
+                            </div>
+                            <span class="legend-right" id="legend-errors-text">0</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="footer-row" style="margin-top: 14px;">
+                <span>Last Updated: <span id="last-update-time">11:51:00 AM</span></span>
+                <span style="display:flex; align-items:center; gap:4px;">
+                    <span class="live-dot" style="width:6px; height:6px; box-shadow:none;"></span>
+                    Live
+                </span>
+            </div>
+
+            <!-- ════════════════════════════════════════════════════════
+                 HOTDOG TRACKER PANEL (additive)
+            ════════════════════════════════════════════════════════ -->
+            <div class="hotdog-tracker-panel" style="display: flex;">
+                <div class="hotdog-tracker-header">
+                    <span class="hotdog-tracker-title">🌭 Hotdog Tracker</span>
+                    <span class="hotdog-count-badge" id="hotdog-count-badge">0 detected</span>
+                </div>
+                <div class="hotdog-log-scroll" id="hotdog-log-container">
+                    <div style="color: #4b5563; font-size: 11px; text-align: center; padding: 8px;">
+                        No hotdogs detected yet...
+                    </div>
+                </div>
+                <!-- Compact JSON summary toggle -->
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-top:4px;">
+                    <span style="font-size:10px; color:#6b7280;">JSON Summary</span>
+                    <button id="hotdog-json-toggle" onclick="toggleHotdogJson()"
+                        style="background:#1f2937; border:1px solid #374151; color:#9ca3af;
+                               font-size:9px; padding:2px 8px; border-radius:4px; cursor:pointer;">
+                        Show
+                    </button>
+                </div>
+                <pre class="hotdog-json-pre" id="hotdog-json-pre" style="display:none;"></pre>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- Hidden Validation Panel for details popup -->
+    <div class="validation-panel" id="validation-panel" style="display: none;">
+        <div class="validation-title">
+            <span class="icon">✗</span>
+            <span id="validation-message">Wrong Order</span>
+        </div>
+        <div class="validation-details" id="validation-details"></div>
+    </div>
+
+    <script>
+        let latestData = {};
+        let currentTicketId = null;
+        let selectedOrderId = null;
+
+        // Persist completion alerts
+        let lastCompletionTime = null;
+        let completedOrderId = null;
+        const ALERT_PERSIST_MS = 5000;
+
+        // Frame timing & delays
+        let itemAddedTimes = {}; // maps item -> Array of timestamps when picked count increased
+        let lastPickedCounts = {};
+        let eventTimestamps = new Map(); // maps event JSON -> first seen timestamp
+
+        // Hand place tracking
+        window.placedEventTimes = {};
+
+        // Track active order item count timings
+        let lastItemCount = 0;
+
+        // Auto update clock
+        setInterval(() => {
+            const timeVal = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+            document.getElementById('current-time').textContent = timeVal;
+            document.getElementById('last-update-time').textContent = timeVal;
+        }, 1000);
+
+        function isItemMatch(expected, eventDesc) {
+            const exp = expected.toLowerCase().replace(/_/g, ' ').replace(/\s+/g, ' ').trim();
+            const desc = eventDesc.toLowerCase().replace(/_/g, ' ').replace(/\s+/g, ' ').trim();
+            const aliases = {
+                "pickle swears": ["pickles (rounds)", "pickle rounds", "pickle", "pickles"],
+                "pickel swears": ["pickles (rounds)", "pickle rounds", "pickle", "pickles"],
+                "yellow cheese (sliced)": ["yellow cheese", "sliced cheese"],
+                "yellow cheese sliced": ["yellow cheese", "sliced cheese"],
+                "yellow mustard sauce": ["yellow mustard", "mustard"],
+                "yellow mustard": ["yellow mustard sauce", "mustard"],
+                "ketchup sauce": ["ketchup"],
+                "ketchup": ["ketchup sauce"]
+            };
+            if (desc.includes(exp)) {
+                return true;
+            }
+            if (aliases[exp]) {
+                return aliases[exp].some(alias => desc.includes(alias));
+            }
+            return false;
+        }
+
+        function getDelayedPickedCount(item, currentOrderObj) {
+            if (!currentOrderObj) return 0;
+            if (currentOrderObj.status === 'completed') {
+                return currentOrderObj.picked_counts[item] || 0;
+            }
+
+            const lowerItem = item.toLowerCase().replace(/_/g, ' ');
+
+            // For sauce items: check applied_sauces list and picked_counts with exact match
+            const isSauceItem = lowerItem.includes("mustard") || lowerItem.includes("ketchup") || lowerItem.includes("sauce");
+            if (isSauceItem) {
+                const normItem = lowerItem.replace(/_/g, ' ').replace(/\s+/g, ' ').trim();
+                const appliedSauces = currentOrderObj.applied_sauces || [];
+                for (const s of appliedSauces) {
+                    const normS = s.toLowerCase().replace(/_/g, ' ').replace(/\s+/g, ' ').trim();
+                    if (normS === normItem) return 1;
+                }
+                const pc = currentOrderObj.picked_counts || {};
+                for (const [k, v] of Object.entries(pc)) {
+                    const normK = k.toLowerCase().replace(/_/g, ' ').replace(/\s+/g, ' ').trim();
+                    if (normK === normItem) return v || 0;
+                }
+                return 0;
+            }
+
+            // Return picked count immediately — no artificial delay.
+            // False-positive suppression is handled at the detection level
+            // (dwell-time gate + hand-presence gate in hotdog_tracker.py).
+            return currentOrderObj.picked_counts[item] || 0;
+        }
+
+
+        function renderUI() {
+            if (!latestData || !latestData.orders) return;
+
+            const orders = latestData.orders;
+            const history = latestData.history || [];
+            const activeOrder = orders.find(o => o.status === 'in_progress') || orders.find(o => o.status === 'pending');
+
+            // Resolve which order details to show
+            let currentOrder = null;
+            const now = Date.now();
+            const elapsed = now - lastCompletionTime;
+            const showCompletedAlert = (completedOrderId && (elapsed < ALERT_PERSIST_MS));
+            const isFadingOut = showCompletedAlert && (ALERT_PERSIST_MS - elapsed <= 300);
+
+            if (selectedOrderId) {
+                currentOrder = orders.find(o => o.ticket_id === selectedOrderId);
+            } else if (showCompletedAlert) {
+                currentOrder = orders.find(o => o.ticket_id === completedOrderId);
+            } else {
+                currentOrder = activeOrder;
+            }
+
+            // Build placedItems set based on events
+            const placedItems = new Set();
+            if (latestData.events) {
+                latestData.events.forEach(evt => {
+                    const desc = evt.description.toLowerCase();
+                    if (desc.includes("placed") || desc.includes("applied") || desc.includes("sauce")) {
+                        if (currentOrder && currentOrder.expected_items) {
+                            currentOrder.expected_items.forEach(expectedItem => {
+                                if (isItemMatch(expectedItem, desc)) {
+                                    placedItems.add(expectedItem);
+                                    if (!window.placedEventTimes) {
+                                        window.placedEventTimes = {};
+                                    }
+                                    if (!window.placedEventTimes[expectedItem]) {
+                                        window.placedEventTimes[expectedItem] = Date.now();
+                                    }
+                                }
+                            });
+                        }
+                    }
+                });
+            }
+
+            // Accuracy evaluation for overall status banner
+            const expectedCountsForStatus = {};
+            if (currentOrder && currentOrder.expected_items) {
+                currentOrder.expected_items.forEach(item => {
+                    expectedCountsForStatus[item] = (expectedCountsForStatus[item] || 0) + 1;
+                });
+            }
+
+            let hasMissing = false;
+            let totalItemsRequired = 0;
+            let totalItemsDetected = 0;
+
+            if (currentOrder && currentOrder.expected_items) {
+                Object.entries(expectedCountsForStatus).forEach(([item, reqQty]) => {
+                    totalItemsRequired += reqQty;
+                    const pickedQty = getDelayedPickedCount(item, currentOrder);
+                    totalItemsDetected += Math.min(pickedQty, reqQty);
+                    if (pickedQty < reqQty) {
+                        hasMissing = true;
+                    }
+                });
+            }
+
+            // Calculate if all required items are detected/added
+            let allItemsDetected = false;
+            if (currentOrder && currentOrder.expected_items && currentOrder.expected_items.length > 0) {
+                allItemsDetected = totalItemsDetected >= totalItemsRequired;
+            }
+
+            if (allItemsDetected && !window.allDetectedTime) {
+                window.allDetectedTime = Date.now();
+            } else if (!allItemsDetected) {
+                window.allDetectedTime = null;
+            }
+
+            const showFinished = (allItemsDetected && (Date.now() - window.allDetectedTime >= 5000)) ||
+                (currentOrder && currentOrder.ending_soon === true) ||
+                (currentOrder && currentOrder.status === 'completed' && currentOrder.passed);
+
+            // Update main overall status box
+            const overallStatusBadge = document.getElementById('overall-status-badge');
+            if (!currentOrder || !currentOrder.ticket_id) {
+                overallStatusBadge.innerHTML = '<span>WAITING</span><span>&#9711;</span>';
+                overallStatusBadge.className = 'status pending';
+            } else if (currentOrder.status === 'abandoned') {
+                overallStatusBadge.innerHTML = '<span>ABANDONED</span><span>&#10007;</span>';
+                overallStatusBadge.className = 'status fail';
+            } else if (showFinished || currentOrder.status === 'completed') {
+                if (hasMissing) {
+                    overallStatusBadge.innerHTML = '<span>WRONG ORDER</span><span>&#10007;</span>';
+                    overallStatusBadge.className = 'status fail';
+                } else {
+                    overallStatusBadge.innerHTML = '<span>FINISHED</span><span>✓</span>';
+                    overallStatusBadge.className = 'status';
+                }
+            } else {
+                overallStatusBadge.innerHTML = '<span>IN PROGRESS</span><span>&#9711;</span>';
+                overallStatusBadge.className = 'status pending';
+            }
+
+            // Render KDS Queue Cards (Left Sidebar)
+            const kdsQueueList = document.getElementById('kds-queue-list');
+            kdsQueueList.innerHTML = '';
+            
+            // Render Tab counts
+            const tabAll = document.getElementById('tab-all');
+            const tabNew = document.getElementById('tab-new');
+            const tabProgress = document.getElementById('tab-progress');
+            const tabCompleted = document.getElementById('tab-completed');
+            
+            tabAll.textContent = `All (${orders.length})`;
+            tabNew.textContent = `New (${orders.filter(o => o.status === 'pending').length})`;
+            tabProgress.textContent = `In Progress (${orders.filter(o => o.status === 'in_progress').length})`;
+            tabCompleted.textContent = `Completed (${orders.filter(o => o.status === 'completed').length})`;
+
+            // Filter out duplicate tickets (keep last/most updated instance of each ticket ID)
+            const uniqueOrdersMap = new Map();
+            orders.forEach(o => {
+                uniqueOrdersMap.set(o.ticket_id, o);
+            });
+            const uniqueOrders = Array.from(uniqueOrdersMap.values());
+
+            // Limit KDS display list to last 4 orders
+            const limitedOrders = uniqueOrders.slice(-4);
+
+            const sortedOrders = limitedOrders.sort((a, b) => {
+                if (a.status === 'in_progress' && b.status !== 'in_progress') return -1;
+                if (b.status === 'in_progress' && a.status !== 'in_progress') return 1;
+                return 0;
+            });
+
+            sortedOrders.forEach((ord, index) => {
+                const isCurrentSelection = (selectedOrderId === ord.ticket_id) || (!selectedOrderId && ord.status === 'in_progress');
+                let isOrdCompleted = ord.status === 'completed';
+                if (isCurrentSelection) {
+                    isOrdCompleted = showFinished;
+                }
+
+                // Check if this queue order has any missing items
+                let ordHasMissing = false;
+                if (ord.expected_items) {
+                    const ordExpectedCounts = {};
+                    ord.expected_items.forEach(item => {
+                        ordExpectedCounts[item] = (ordExpectedCounts[item] || 0) + 1;
+                    });
+                    Object.entries(ordExpectedCounts).forEach(([item, reqQty]) => {
+                        let pickedQty = 0;
+                        if (ord.status === 'completed') {
+                            pickedQty = ord.picked_counts[item] || 0;
+                        } else if (isCurrentSelection) {
+                            pickedQty = getDelayedPickedCount(item, ord);
+                        } else {
+                            pickedQty = ord.picked_counts[item] || 0;
+                        }
+                        if (pickedQty < reqQty) {
+                            ordHasMissing = true;
+                        }
+                    });
+                }
+
+            });
+
+            // Do not show previous orders in the queue
+            kdsQueueList.innerHTML = '<div style="color: #6b7280; font-size: 11px; padding: 10px; text-align: center;">Queue hidden</div>';
+
+            // Render Detected Items (Left Sidebar)
+            const addedItemsList = document.getElementById('added-items-list');
+            if (currentOrder && currentOrder.picked_counts) {
+                const pickedItems = Object.keys(currentOrder.picked_counts);
+
+                addedItemsList.innerHTML = '';
+                if (pickedItems.length === 0) {
+                    addedItemsList.innerHTML = '<li style="color: #6b7280; font-size: 11px; padding: 6px; text-align: center;">No items detected yet</li>';
+                } else {
+                    pickedItems.forEach(item => {
+                        const pickedQty = currentOrder.picked_counts[item];
+
+                        const li = document.createElement('li');
+                        li.style.background = '#1f2937';
+                        li.style.border = '1px solid rgba(16, 185, 129, 0.3)';
+                        li.style.borderRadius = '6px';
+                        li.style.padding = '8px 12px';
+                        li.style.display = 'flex';
+                        li.style.justifyContent = 'space-between';
+                        li.style.alignItems = 'center';
+                        li.style.fontSize = '12px';
+                        
+                        li.innerHTML = `
+                            <span style="color: #fff; font-weight: 500;">${item}</span>
+                            <span style="color: #10b981; font-weight: 700;">✓ x${pickedQty}</span>
+                        `;
+                        addedItemsList.appendChild(li);
+                    });
+                }
+            } else {
+                addedItemsList.innerHTML = '<li style="color: #6b7280; font-size: 11px; padding: 6px; text-align: center;">Waiting for detections...</li>';
+            }
+
+            // Calculate Performance Metrics from History (full history)
+            const totalOrdersCount = history.length;
+            const completedCount = history.filter(o => o.status === 'completed' || o.status === 'finished').length;
+            
+            const correctOrders = history.filter(o => {
+                if (!o.expected_items) return true;
+                const ordExpectedCounts = {};
+                o.expected_items.forEach(item => {
+                    ordExpectedCounts[item] = (ordExpectedCounts[item] || 0) + 1;
+                });
+                let ordHasMissing = false;
+                Object.entries(ordExpectedCounts).forEach(([item, reqQty]) => {
+                    const pickedQty = o.picked_counts[item] || 0;
+                    if (pickedQty < reqQty) {
+                        ordHasMissing = true;
+                    }
+                });
+                return !ordHasMissing;
+            }).length;
+
+            const failedOrders = totalOrdersCount - correctOrders;
+            const accuracyPctVal = totalOrdersCount > 0 ? ((correctOrders / totalOrdersCount) * 100) : 0.0;
+            const accuracyPctStr = accuracyPctVal.toFixed(1);
+
+            // Update metrics grid
+            document.getElementById('metric-total').textContent = totalOrdersCount;
+            document.getElementById('metric-completed').textContent = completedCount;
+
+            // Update Donut Chart colors & stroke based on accuracy
+            const donutCircle = document.getElementById('donut-circle');
+            if (totalOrdersCount === 0) {
+                document.getElementById('donut-val-text').textContent = "0.0";
+                donutCircle.style.stroke = 'transparent';
+            } else {
+                document.getElementById('donut-val-text').textContent = accuracyPctStr;
+                // Green for positive accuracy (> 0%), Red for absolute error (0% accuracy / all failed)
+                if (accuracyPctVal > 0) {
+                    donutCircle.style.stroke = '#10b981';
+                } else {
+                    donutCircle.style.stroke = '#ef4444';
+                }
+            }
+            
+            document.getElementById('legend-correct-text').textContent = `${correctOrders}`;
+            document.getElementById('legend-errors-text').textContent = `${failedOrders}`;
+
+            // SVG Donut fg stroke-dashoffset: circumference is 251.2
+            const circumference = 251.2;
+            const dashoffset = totalOrdersCount > 0 ? (circumference - (accuracyPctVal / 100) * circumference) : circumference;
+            donutCircle.style.strokeDashoffset = dashoffset;
+
+            // Hidden validation details popups
+            const valPanel = document.getElementById('validation-panel');
+            if (currentOrder && (currentOrder.status === 'completed' || currentOrder.status === 'abandoned' || showFinished)) {
+                valPanel.style.display = 'flex';
+                if (isFadingOut) {
+                    valPanel.classList.add('fade-out');
+                } else {
+                    valPanel.classList.remove('fade-out');
+                }
+                
+                if (currentOrder.status === 'abandoned') {
+                    document.getElementById('validation-message').textContent = 'Abandoned';
+                    document.getElementById('validation-details').innerHTML = '<div>Order was abandoned.</div>';
+                } else if (hasMissing) {
+                    document.getElementById('validation-message').textContent = 'Wrong Order';
+                    let detailsHtml = '';
+                    if (currentOrder.missing_items && currentOrder.missing_items.length > 0) {
+                        detailsHtml += `<div><strong>Missing:</strong> ${currentOrder.missing_items.join(', ')}</div>`;
+                    }
+                    document.getElementById('validation-details').innerHTML = detailsHtml;
+                } else {
+                    document.getElementById('validation-message').textContent = 'Finished';
+                    document.getElementById('validation-details').innerHTML = '<div>All required ingredients verified.</div>';
+                }
+            } else {
+                valPanel.style.display = 'none';
+            }
+        }
+
+        const ws = new WebSocket(`ws://${location.host}/ws`);
+        ws.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            latestData = data;
+
+            const order = data.order || {};
+            const pickedCounts = order.picked_counts || {};
+
+            // Reset tracking state if ticket ID changes
+            if (order.ticket_id !== currentTicketId) {
+                if (currentTicketId !== null && order.ticket_id !== "") {
+                    // Record completion for persistence alert
+                    lastCompletionTime = Date.now();
+                    completedOrderId = currentTicketId;
+                }
+                currentTicketId = order.ticket_id;
+                itemAddedTimes = {};
+                lastPickedCounts = {};
+                eventTimestamps.clear();
+                window.placedEventTimes = {};
+                selectedOrderId = null;
+            }
+
+            // Track timestamps when picked counts increase
+            Object.keys(pickedCounts).forEach(item => {
+                const currentCount = pickedCounts[item] || 0;
+                const lastCount = lastPickedCounts[item] || 0;
+                if (currentCount > lastCount) {
+                    if (!itemAddedTimes[item]) {
+                        itemAddedTimes[item] = [];
+                    }
+                    for (let i = lastCount; i < currentCount; i++) {
+                        itemAddedTimes[item].push(Date.now());
+                    }
+                }
+            });
+            lastPickedCounts = { ...pickedCounts };
+
+            // Update FPS display
+            if (data.fps !== undefined) {
+                const fpsEl = document.getElementById('fps');
+                if (fpsEl) fpsEl.textContent = data.fps.toFixed(1);
+            }
+
+            // Track timestamps for events
+            if (data.events) {
+                data.events.forEach(evt => {
+                    const key = JSON.stringify(evt);
+                    if (!eventTimestamps.has(key)) {
+                        eventTimestamps.set(key, Date.now());
+                    }
+                });
+                if (eventTimestamps.size > 100) {
+                    const keys = Array.from(eventTimestamps.keys());
+                    for (let i = 0; i < 50; i++) {
+                        eventTimestamps.delete(keys[i]);
+                    }
+                }
+            }
+
+            renderUI();
+        };
+
+        // Periodically refresh the UI to update the countdowns/timestamps
+        setInterval(renderUI, 100);
+
+        /* ══════════════════════════════════════════════════════════
+           Hotdog Tracker JS (additive — reads hotdog_log from WS)
+        ════════════════════════════════════════════════════════════ */
+
+        let _hotdogJsonVisible = false;
+
+        function toggleHotdogJson() {
+            _hotdogJsonVisible = !_hotdogJsonVisible;
+            const pre = document.getElementById('hotdog-json-pre');
+            const btn = document.getElementById('hotdog-json-toggle');
+            pre.style.display = _hotdogJsonVisible ? 'block' : 'none';
+            btn.textContent = _hotdogJsonVisible ? 'Hide' : 'Show';
+        }
+
+        function renderHotdogTracker(hotdogLog) {
+            const container = document.getElementById('hotdog-log-container');
+            const badge     = document.getElementById('hotdog-count-badge');
+            const jsonPre   = document.getElementById('hotdog-json-pre');
+
+            if (!hotdogLog || Object.keys(hotdogLog).length === 0) {
+                badge.textContent = '0 detected';
+                container.innerHTML = '<div style="color:#4b5563;font-size:11px;text-align:center;padding:8px;">No hotdogs detected yet...</div>';
+                jsonPre.textContent = '{}';
+                return;
+            }
+
+            const entries = Object.values(hotdogLog).sort((a, b) => {
+                const numA = (a.track_id || 0);
+                const numB = (b.track_id || 0);
+                return numA - numB;
+            });
+            badge.textContent = `${entries.length} detected`;
+
+            let html = '';
+            entries.forEach(rec => {
+                const isActive   = rec.active;
+                const statusCls  = isActive ? 'active-pill' : 'idle-pill';
+                const statusLabel = isActive ? 'ACTIVE' : 'IDLE';
+                const entryCls   = isActive ? 'hotdog-entry active' : 'hotdog-entry';
+
+                // ── Item-count summary grid ──────────────────────────────────
+                const counts = rec.item_counts || {};
+                const countKeys = Object.keys(counts);
+                const totalToppings = countKeys.reduce((s, k) => s + counts[k], 0);
+
+                let countGridHtml = '';
+                if (countKeys.length > 0) {
+                    // Sort: most-applied first
+                    const sorted = countKeys.slice().sort((a, b) => counts[b] - counts[a]);
+                    countGridHtml = `
+                        <div style="display:flex;flex-wrap:wrap;gap:4px;margin:6px 0 2px;">
+                            ${sorted.map(name => {
+                                const n = counts[name];
+                                const label = name.replace(/_/g, ' ');
+                                const badgeColor = n > 1 ? '#f59e0b' : '#22c55e';
+                                return `<span style="
+                                    display:inline-flex;align-items:center;gap:3px;
+                                    background:#1f2937;border:1px solid #374151;
+                                    border-radius:12px;padding:2px 8px;
+                                    font-size:10px;color:#d1d5db;white-space:nowrap;">
+                                    ${label}
+                                    <span style="background:${badgeColor};color:#000;
+                                        border-radius:8px;padding:1px 5px;font-weight:700;
+                                        font-size:9px;">×${n}</span>
+                                </span>`;
+                            }).join('')}
+                        </div>
+                        <div style="font-size:10px;color:#6b7280;margin-bottom:4px;">
+                            ${totalToppings} application${totalToppings !== 1 ? 's' : ''} total
+                            &nbsp;|&nbsp; ${countKeys.length} unique item${countKeys.length !== 1 ? 's' : ''}
+                        </div>`;
+                } else {
+                    countGridHtml = '<span style="color:#4b5563;font-size:11px;">No items detected yet</span>';
+                }
+
+                // ── Full timeline (collapsible) ──────────────────────────────
+                let timelineHtml = '';
+                if (rec.items_added && rec.items_added.length > 0) {
+                    timelineHtml = rec.items_added.map(it => {
+                        return `<div class="hotdog-item-row">
+                            <span class="hotdog-item-name">${it.item.replace(/_/g, ' ')}</span>
+                            <span class="hotdog-item-time">${it.time_str || ''}</span>
+                        </div>`;
+                    }).join('');
+                }
+
+                const hid = rec.hotdog_id || rec.track_id;
+                const orderBadge = rec.order_id ? `<span style="font-size:10px;color:#6b7280;margin-left:6px;font-weight:600;">[${rec.order_id}]</span>` : '';
+                html += `
+                    <div class="${entryCls}">
+                        <div class="hotdog-entry-header">
+                            <span class="hotdog-entry-id" style="font-weight:800;color:#f97316;font-size:13px;">🌭 hotdog_${hid} ${orderBadge}</span>
+                            <span class="hotdog-status-pill ${statusCls}">${statusLabel}</span>
+                        </div>
+                        ${countGridHtml}
+                        ${timelineHtml}
+                    </div>`;
+            });
+
+            container.innerHTML = html;
+
+            // Build compact JSON summary
+            const summary = {};
+            entries.forEach((rec, i) => {
+                summary[`order${i + 1}`] = {
+                    item_counts: rec.item_counts || {},
+                    item_names:  rec.item_names,
+                };
+            });
+            jsonPre.textContent = JSON.stringify(summary, null, 2);
+        }
+
+
+        // Patch the existing WebSocket onmessage to also call renderHotdogTracker
+        const _origWsOnMessage = ws.onmessage;
+        ws.onmessage = (event) => {
+            if (_origWsOnMessage) _origWsOnMessage(event);
+            try {
+                const data = JSON.parse(event.data);
+                if (data.hotdog_log !== undefined) {
+                    renderHotdogTracker(data.hotdog_log);
+                }
+            } catch(e) {}
+        };
+    </script>
+</body>
+
+</html>

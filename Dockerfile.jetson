@@ -1,0 +1,42 @@
+# Jetson-native image: JetPack 6.2 / L4T R36.4 / CUDA 12.6 / Python 3.10 (aarch64).
+# Build:  docker build -f Dockerfile.jetson -t oad-pipeline:jetson .
+# Run:    docker compose -f docker-compose.jetson.yml up   (uses runtime: nvidia)
+FROM nvcr.io/nvidia/l4t-jetpack:r36.4.0 AS base
+
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    UV_PYTHON_PREFERENCE=only-system
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3.10 python3.10-venv python3.10-dev \
+    libgl1 libglib2.0-0 libxext6 libxrender1 libgomp1 \
+    libopenblas0 \
+    ffmpeg curl \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY pyproject.toml uv.lock .python-version ./
+
+# 1) Resolve app deps from the lock (this pulls a CPU torch transitively via ultralytics).
+# 2) Override torch/torchvision with the Jetson CUDA wheels (cp310, cu126).
+# 3) Pin numpy<2 — the Jetson torch 2.8 wheel is built against NumPy 1.x.
+RUN uv sync --frozen --no-dev --no-install-project \
+    && uv pip install "torch==2.8.0" "torchvision==0.23.0" --no-deps --reinstall \
+        --index-url https://pypi.jetson-ai-lab.io/jp6/cu126 \
+    && uv pip install "numpy<2"
+
+COPY src/ src/
+COPY config/ config/
+COPY templates/ templates/
+
+EXPOSE 8000
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+    CMD curl -f http://localhost:8000/api/stats || exit 1
+
+# --no-sync: do NOT re-sync at runtime, which would clobber the Jetson torch override.
+ENTRYPOINT ["uv", "run", "--no-sync", "python", "-m", "src.main"]

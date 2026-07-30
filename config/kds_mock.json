@@ -1,0 +1,16 @@
+{
+  "tickets": [
+    {
+      "ticket_id": "V1-05",
+      "expected_items": [
+        "yellow_mustard_sauce",
+        "relish",
+        "onions",
+        "tomato",
+        "sport (wax) peppers",
+        "pickel swears",
+        "ketchup_sauce"
+      ]
+    }
+  ]
+}
