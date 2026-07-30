@@ -1,0 +1,2157 @@
+[
+  {
+    "ticket_id": "V1-05",
+    "status": "completed",
+    "passed": false,
+    "result": "extra item added",
+    "expected_items": [
+      "yellow_mustard_sauce",
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ],
+    "picked_counts": {
+      "chilli": 12,
+      "onions": 2,
+      "yellow_mustard_sauce": 1,
+      "sport (wax) peppers": 1,
+      "pickles (rounds)": 7,
+      "polish hot dog": 1
+    },
+    "time": "08:38 PM",
+    "missing_items": [
+      "relish",
+      "tomato",
+      "pickel swears",
+      "ketchup_sauce"
+    ],
+    "extra_items": [
+      "onions"
+    ],
+    "applied_sauces": [
+      "yellow_mustard_sauce"
+    ]
+  },
+  {
+    "ticket_id": "V1-05",
+    "status": "completed",
+    "passed": false,
+    "result": "All ingredients are not present",
+    "expected_items": [
+      "yellow_mustard_sauce",
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ],
+    "picked_counts": {},
+    "time": "08:38 PM",
+    "missing_items": [
+      "yellow_mustard_sauce",
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ]
+  },
+  {
+    "ticket_id": "V1-05",
+    "status": "completed",
+    "passed": false,
+    "result": "All ingredients are not present",
+    "expected_items": [
+      "yellow_mustard_sauce",
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ],
+    "picked_counts": {
+      "chilli": 1,
+      "relish": 1,
+      "onions": 1,
+      "grated yellow cheese": 2
+    },
+    "time": "08:38 PM",
+    "missing_items": [
+      "yellow_mustard_sauce",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ]
+  },
+  {
+    "ticket_id": "V1-05",
+    "status": "completed",
+    "passed": false,
+    "result": "All ingredients are not present",
+    "expected_items": [
+      "yellow_mustard_sauce",
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ],
+    "picked_counts": {},
+    "time": "08:38 PM",
+    "missing_items": [
+      "yellow_mustard_sauce",
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ]
+  },
+  {
+    "ticket_id": "V1-05",
+    "status": "completed",
+    "passed": false,
+    "result": "All ingredients are not present",
+    "expected_items": [
+      "yellow_mustard_sauce",
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ],
+    "picked_counts": {
+      "yellow_mustard_sauce": 1,
+      "onions": 1,
+      "pickles (rounds)": 1,
+      "yellow cheese (sliced)": 1,
+      "grated yellow cheese": 2
+    },
+    "time": "08:38 PM",
+    "missing_items": [
+      "relish",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ],
+    "applied_sauces": [
+      "yellow_mustard_sauce"
+    ]
+  },
+  {
+    "ticket_id": "V1-05",
+    "status": "completed",
+    "passed": false,
+    "result": "extra item added",
+    "expected_items": [
+      "yellow_mustard_sauce",
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ],
+    "picked_counts": {
+      "chilli": 12,
+      "onions": 2,
+      "yellow_mustard_sauce": 1,
+      "sport (wax) peppers": 1,
+      "pickles (rounds)": 7,
+      "polish hot dog": 1
+    },
+    "time": "08:38 PM",
+    "missing_items": [
+      "relish",
+      "tomato",
+      "pickel swears",
+      "ketchup_sauce"
+    ],
+    "extra_items": [
+      "onions"
+    ],
+    "applied_sauces": [
+      "yellow_mustard_sauce"
+    ]
+  },
+  {
+    "ticket_id": "V1-05",
+    "status": "completed",
+    "passed": false,
+    "result": "All ingredients are not present",
+    "expected_items": [
+      "yellow_mustard_sauce",
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ],
+    "picked_counts": {
+      "chilli": 4,
+      "pickles (rounds)": 1,
+      "grated yellow cheese": 1
+    },
+    "time": "08:38 PM",
+    "missing_items": [
+      "yellow_mustard_sauce",
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ]
+  },
+  {
+    "ticket_id": "V1-05",
+    "status": "completed",
+    "passed": false,
+    "result": "All ingredients are not present",
+    "expected_items": [
+      "yellow_mustard_sauce",
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ],
+    "picked_counts": {
+      "yellow_mustard_sauce": 1,
+      "sport (wax) peppers": 1,
+      "pickles (rounds)": 5,
+      "polish hot dog": 1,
+      "chilli": 1
+    },
+    "time": "08:38 PM",
+    "missing_items": [
+      "relish",
+      "onions",
+      "tomato",
+      "pickel swears",
+      "ketchup_sauce"
+    ],
+    "applied_sauces": [
+      "yellow_mustard_sauce"
+    ]
+  },
+  {
+    "ticket_id": "V1-05",
+    "status": "completed",
+    "passed": false,
+    "result": "All ingredients are not present",
+    "expected_items": [
+      "yellow_mustard_sauce",
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ],
+    "picked_counts": {},
+    "time": "08:38 PM",
+    "missing_items": [
+      "yellow_mustard_sauce",
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ]
+  },
+  {
+    "ticket_id": "V1-05",
+    "status": "completed",
+    "passed": false,
+    "result": "All ingredients are not present",
+    "expected_items": [
+      "yellow_mustard_sauce",
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ],
+    "picked_counts": {
+      "chilli": 1,
+      "grated yellow cheese": 2
+    },
+    "time": "08:38 PM",
+    "missing_items": [
+      "yellow_mustard_sauce",
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ]
+  },
+  {
+    "ticket_id": "V1-05",
+    "status": "completed",
+    "passed": false,
+    "result": "extra item added",
+    "expected_items": [
+      "yellow_mustard_sauce",
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ],
+    "picked_counts": {
+      "yellow_mustard_sauce": 4,
+      "chilli": 3,
+      "sport (wax) peppers": 1,
+      "pickles (rounds)": 5,
+      "polish hot dog": 1
+    },
+    "time": "08:38 PM",
+    "missing_items": [
+      "relish",
+      "onions",
+      "tomato",
+      "pickel swears",
+      "ketchup_sauce"
+    ],
+    "extra_items": [
+      "yellow_mustard_sauce"
+    ],
+    "applied_sauces": [
+      "yellow_mustard_sauce"
+    ]
+  },
+  {
+    "ticket_id": "V1-05",
+    "status": "completed",
+    "passed": false,
+    "result": "extra item added",
+    "expected_items": [
+      "yellow_mustard_sauce",
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ],
+    "picked_counts": {
+      "yellow_mustard_sauce": 4,
+      "chilli": 3,
+      "sport (wax) peppers": 1,
+      "pickles (rounds)": 3,
+      "polish hot dog": 1
+    },
+    "time": "08:38 PM",
+    "missing_items": [
+      "relish",
+      "onions",
+      "tomato",
+      "pickel swears",
+      "ketchup_sauce"
+    ],
+    "extra_items": [
+      "yellow_mustard_sauce"
+    ],
+    "applied_sauces": [
+      "yellow_mustard_sauce"
+    ]
+  },
+  {
+    "ticket_id": "V1-05",
+    "status": "completed",
+    "passed": false,
+    "result": "All ingredients are not present",
+    "expected_items": [
+      "yellow_mustard_sauce",
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ],
+    "picked_counts": {
+      "chilli": 12,
+      "grated yellow cheese": 1
+    },
+    "time": "08:38 PM",
+    "missing_items": [
+      "yellow_mustard_sauce",
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ]
+  },
+  {
+    "ticket_id": "V1-05",
+    "status": "completed",
+    "passed": false,
+    "result": "extra item added",
+    "expected_items": [
+      "yellow_mustard_sauce",
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ],
+    "picked_counts": {
+      "yellow_mustard_sauce": 2,
+      "onions": 1
+    },
+    "time": "08:38 PM",
+    "missing_items": [
+      "relish",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ],
+    "extra_items": [
+      "yellow_mustard_sauce"
+    ],
+    "applied_sauces": [
+      "yellow_mustard_sauce"
+    ]
+  },
+  {
+    "ticket_id": "V1-05",
+    "status": "completed",
+    "passed": false,
+    "result": "extra item added",
+    "expected_items": [
+      "yellow_mustard_sauce",
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ],
+    "picked_counts": {
+      "yellow_mustard_sauce": 2,
+      "ketchup_sauce": 1
+    },
+    "time": "08:38 PM",
+    "missing_items": [
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears"
+    ],
+    "extra_items": [
+      "yellow_mustard_sauce"
+    ],
+    "applied_sauces": [
+      "yellow_mustard_sauce",
+      "ketchup_sauce"
+    ]
+  },
+  {
+    "ticket_id": "V1-05",
+    "status": "completed",
+    "passed": false,
+    "result": "All ingredients are not present",
+    "expected_items": [
+      "yellow_mustard_sauce",
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ],
+    "picked_counts": {
+      "chilli": 1
+    },
+    "time": "08:38 PM",
+    "missing_items": [
+      "yellow_mustard_sauce",
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ]
+  },
+  {
+    "ticket_id": "V1-05",
+    "status": "completed",
+    "passed": false,
+    "result": "extra item added",
+    "expected_items": [
+      "yellow_mustard_sauce",
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ],
+    "picked_counts": {
+      "yellow_mustard_sauce": 2,
+      "onions": 1
+    },
+    "time": "08:38 PM",
+    "missing_items": [
+      "relish",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ],
+    "extra_items": [
+      "yellow_mustard_sauce"
+    ],
+    "applied_sauces": [
+      "yellow_mustard_sauce"
+    ]
+  },
+  {
+    "ticket_id": "V1-05",
+    "status": "completed",
+    "passed": false,
+    "result": "extra item added",
+    "expected_items": [
+      "yellow_mustard_sauce",
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ],
+    "picked_counts": {
+      "yellow_mustard_sauce": 2,
+      "onions": 1
+    },
+    "time": "08:38 PM",
+    "missing_items": [
+      "relish",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ],
+    "extra_items": [
+      "yellow_mustard_sauce"
+    ],
+    "applied_sauces": [
+      "yellow_mustard_sauce"
+    ]
+  },
+  {
+    "ticket_id": "V1-05",
+    "status": "completed",
+    "passed": false,
+    "result": "extra item added",
+    "expected_items": [
+      "yellow_mustard_sauce",
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ],
+    "picked_counts": {
+      "yellow_mustard_sauce": 2,
+      "ketchup_sauce": 1
+    },
+    "time": "08:38 PM",
+    "missing_items": [
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears"
+    ],
+    "extra_items": [
+      "yellow_mustard_sauce"
+    ],
+    "applied_sauces": [
+      "yellow_mustard_sauce",
+      "ketchup_sauce"
+    ]
+  },
+  {
+    "ticket_id": "V1-05",
+    "status": "completed",
+    "passed": false,
+    "result": "All ingredients are not present",
+    "expected_items": [
+      "yellow_mustard_sauce",
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ],
+    "picked_counts": {
+      "chilli": 1
+    },
+    "time": "08:38 PM",
+    "missing_items": [
+      "yellow_mustard_sauce",
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ]
+  },
+  {
+    "ticket_id": "V1-05",
+    "status": "completed",
+    "passed": false,
+    "result": "All ingredients are not present",
+    "expected_items": [
+      "yellow_mustard_sauce",
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ],
+    "picked_counts": {},
+    "time": "08:38 PM",
+    "missing_items": [
+      "yellow_mustard_sauce",
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ]
+  },
+  {
+    "ticket_id": "V1-05",
+    "status": "completed",
+    "passed": false,
+    "result": "extra item added",
+    "expected_items": [
+      "yellow_mustard_sauce",
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ],
+    "picked_counts": {
+      "yellow_mustard_sauce": 2,
+      "onions": 1
+    },
+    "time": "08:38 PM",
+    "missing_items": [
+      "relish",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ],
+    "extra_items": [
+      "yellow_mustard_sauce"
+    ],
+    "applied_sauces": [
+      "yellow_mustard_sauce"
+    ]
+  },
+  {
+    "ticket_id": "V1-05",
+    "status": "completed",
+    "passed": false,
+    "result": "extra item added",
+    "expected_items": [
+      "yellow_mustard_sauce",
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ],
+    "picked_counts": {
+      "yellow_mustard_sauce": 2,
+      "ketchup_sauce": 1
+    },
+    "time": "08:38 PM",
+    "missing_items": [
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears"
+    ],
+    "extra_items": [
+      "yellow_mustard_sauce"
+    ],
+    "applied_sauces": [
+      "yellow_mustard_sauce",
+      "ketchup_sauce"
+    ]
+  },
+  {
+    "ticket_id": "V1-05",
+    "status": "completed",
+    "passed": false,
+    "result": "All ingredients are not present",
+    "expected_items": [
+      "yellow_mustard_sauce",
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ],
+    "picked_counts": {
+      "chilli": 1,
+      "grated yellow cheese": 1
+    },
+    "time": "08:38 PM",
+    "missing_items": [
+      "yellow_mustard_sauce",
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ]
+  },
+  {
+    "ticket_id": "V1-05",
+    "status": "completed",
+    "passed": false,
+    "result": "All ingredients are not present",
+    "expected_items": [
+      "yellow_mustard_sauce",
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ],
+    "picked_counts": {
+      "yellow_mustard_sauce": 1,
+      "chilli": 10,
+      "grated yellow cheese": 1
+    },
+    "time": "08:38 PM",
+    "missing_items": [
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ],
+    "applied_sauces": [
+      "yellow_mustard_sauce"
+    ]
+  },
+  {
+    "ticket_id": "V1-05",
+    "status": "completed",
+    "passed": false,
+    "result": "All ingredients are not present",
+    "expected_items": [
+      "yellow_mustard_sauce",
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ],
+    "picked_counts": {
+      "yellow_mustard_sauce": 1,
+      "chilli": 10,
+      "grated yellow cheese": 1
+    },
+    "time": "08:38 PM",
+    "missing_items": [
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ],
+    "applied_sauces": [
+      "yellow_mustard_sauce"
+    ]
+  },
+  {
+    "ticket_id": "V1-05",
+    "status": "completed",
+    "passed": false,
+    "result": "extra item added",
+    "expected_items": [
+      "yellow_mustard_sauce",
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ],
+    "picked_counts": {
+      "yellow_mustard_sauce": 6,
+      "onions": 1
+    },
+    "time": "08:38 PM",
+    "missing_items": [
+      "relish",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ],
+    "extra_items": [
+      "yellow_mustard_sauce"
+    ],
+    "applied_sauces": [
+      "yellow_mustard_sauce"
+    ]
+  },
+  {
+    "ticket_id": "V1-05",
+    "status": "completed",
+    "passed": false,
+    "result": "extra item added",
+    "expected_items": [
+      "yellow_mustard_sauce",
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ],
+    "picked_counts": {
+      "yellow_mustard_sauce": 6,
+      "onions": 1
+    },
+    "time": "08:38 PM",
+    "missing_items": [
+      "relish",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ],
+    "extra_items": [
+      "yellow_mustard_sauce"
+    ],
+    "applied_sauces": [
+      "yellow_mustard_sauce"
+    ]
+  },
+  {
+    "ticket_id": "V1-05",
+    "status": "completed",
+    "passed": false,
+    "result": "extra item added",
+    "expected_items": [
+      "yellow_mustard_sauce",
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ],
+    "picked_counts": {
+      "yellow_mustard_sauce": 3,
+      "ketchup_sauce": 2
+    },
+    "time": "08:38 PM",
+    "missing_items": [
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears"
+    ],
+    "extra_items": [
+      "yellow_mustard_sauce",
+      "ketchup_sauce"
+    ],
+    "applied_sauces": [
+      "yellow_mustard_sauce",
+      "ketchup_sauce"
+    ]
+  },
+  {
+    "ticket_id": "V1-05",
+    "status": "completed",
+    "passed": false,
+    "result": "All ingredients are not present",
+    "expected_items": [
+      "yellow_mustard_sauce",
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ],
+    "picked_counts": {},
+    "time": "08:38 PM",
+    "missing_items": [
+      "yellow_mustard_sauce",
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ]
+  },
+  {
+    "ticket_id": "V1-05",
+    "status": "completed",
+    "passed": false,
+    "result": "All ingredients are not present",
+    "expected_items": [
+      "yellow_mustard_sauce",
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ],
+    "picked_counts": {},
+    "time": "08:38 PM",
+    "missing_items": [
+      "yellow_mustard_sauce",
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ]
+  },
+  {
+    "ticket_id": "V1-05",
+    "status": "completed",
+    "passed": false,
+    "result": "extra item added",
+    "expected_items": [
+      "yellow_mustard_sauce",
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ],
+    "picked_counts": {
+      "yellow_mustard_sauce": 10,
+      "ketchup_sauce": 4,
+      "onions": 1
+    },
+    "time": "08:38 PM",
+    "missing_items": [
+      "relish",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears"
+    ],
+    "extra_items": [
+      "yellow_mustard_sauce",
+      "ketchup_sauce"
+    ],
+    "applied_sauces": [
+      "yellow_mustard_sauce",
+      "ketchup_sauce"
+    ]
+  },
+  {
+    "ticket_id": "V1-05",
+    "status": "completed",
+    "passed": false,
+    "result": "extra item added",
+    "expected_items": [
+      "yellow_mustard_sauce",
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ],
+    "picked_counts": {
+      "yellow_mustard_sauce": 10,
+      "ketchup_sauce": 4,
+      "onions": 1
+    },
+    "time": "08:38 PM",
+    "missing_items": [
+      "relish",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears"
+    ],
+    "extra_items": [
+      "yellow_mustard_sauce",
+      "ketchup_sauce"
+    ],
+    "applied_sauces": [
+      "yellow_mustard_sauce",
+      "ketchup_sauce"
+    ]
+  },
+  {
+    "ticket_id": "V1-05",
+    "status": "completed",
+    "passed": false,
+    "result": "extra item added",
+    "expected_items": [
+      "yellow_mustard_sauce",
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ],
+    "picked_counts": {
+      "yellow_mustard_sauce": 16,
+      "ketchup_sauce": 5
+    },
+    "time": "08:38 PM",
+    "missing_items": [
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears"
+    ],
+    "extra_items": [
+      "yellow_mustard_sauce",
+      "ketchup_sauce"
+    ],
+    "applied_sauces": [
+      "yellow_mustard_sauce",
+      "ketchup_sauce"
+    ]
+  },
+  {
+    "ticket_id": "V1-05",
+    "status": "completed",
+    "passed": false,
+    "result": "All ingredients are not present",
+    "expected_items": [
+      "yellow_mustard_sauce",
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ],
+    "picked_counts": {
+      "chilli": 1,
+      "grated yellow cheese": 1
+    },
+    "time": "08:38 PM",
+    "missing_items": [
+      "yellow_mustard_sauce",
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ]
+  },
+  {
+    "ticket_id": "V1-05",
+    "status": "completed",
+    "passed": false,
+    "result": "All ingredients are not present",
+    "expected_items": [
+      "yellow_mustard_sauce",
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ],
+    "picked_counts": {},
+    "time": "08:38 PM",
+    "missing_items": [
+      "yellow_mustard_sauce",
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ]
+  },
+  {
+    "ticket_id": "V1-05",
+    "status": "completed",
+    "passed": false,
+    "result": "extra item added",
+    "expected_items": [
+      "yellow_mustard_sauce",
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ],
+    "picked_counts": {
+      "yellow_mustard_sauce": 5,
+      "onions": 1
+    },
+    "time": "08:38 PM",
+    "missing_items": [
+      "relish",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ],
+    "extra_items": [
+      "yellow_mustard_sauce"
+    ],
+    "applied_sauces": [
+      "yellow_mustard_sauce"
+    ]
+  },
+  {
+    "ticket_id": "V1-05",
+    "status": "completed",
+    "passed": false,
+    "result": "extra item added",
+    "expected_items": [
+      "yellow_mustard_sauce",
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ],
+    "picked_counts": {
+      "yellow_mustard_sauce": 7,
+      "ketchup_sauce": 3,
+      "onions": 1
+    },
+    "time": "08:38 PM",
+    "missing_items": [
+      "relish",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears"
+    ],
+    "extra_items": [
+      "yellow_mustard_sauce",
+      "ketchup_sauce"
+    ],
+    "applied_sauces": [
+      "yellow_mustard_sauce",
+      "ketchup_sauce"
+    ]
+  },
+  {
+    "ticket_id": "V1-05",
+    "status": "completed",
+    "passed": false,
+    "result": "extra item added",
+    "expected_items": [
+      "yellow_mustard_sauce",
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ],
+    "picked_counts": {
+      "yellow_mustard_sauce": 12,
+      "ketchup_sauce": 4
+    },
+    "time": "08:38 PM",
+    "missing_items": [
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears"
+    ],
+    "extra_items": [
+      "yellow_mustard_sauce",
+      "ketchup_sauce"
+    ],
+    "applied_sauces": [
+      "yellow_mustard_sauce",
+      "ketchup_sauce"
+    ]
+  },
+  {
+    "ticket_id": "V1-05",
+    "status": "completed",
+    "passed": false,
+    "result": "All ingredients are not present",
+    "expected_items": [
+      "yellow_mustard_sauce",
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ],
+    "picked_counts": {
+      "chilli": 1,
+      "grated yellow cheese": 1
+    },
+    "time": "08:38 PM",
+    "missing_items": [
+      "yellow_mustard_sauce",
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ]
+  },
+  {
+    "ticket_id": "V1-05",
+    "status": "completed",
+    "passed": false,
+    "result": "extra item added",
+    "expected_items": [
+      "yellow_mustard_sauce",
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ],
+    "picked_counts": {
+      "yellow_mustard_sauce": 7,
+      "ketchup_sauce": 3,
+      "onions": 1
+    },
+    "time": "08:38 PM",
+    "missing_items": [
+      "relish",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears"
+    ],
+    "extra_items": [
+      "yellow_mustard_sauce",
+      "ketchup_sauce"
+    ],
+    "applied_sauces": [
+      "yellow_mustard_sauce",
+      "ketchup_sauce"
+    ]
+  },
+  {
+    "ticket_id": "V1-05",
+    "status": "completed",
+    "passed": false,
+    "result": "extra item added",
+    "expected_items": [
+      "yellow_mustard_sauce",
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ],
+    "picked_counts": {
+      "yellow_mustard_sauce": 7,
+      "ketchup_sauce": 3,
+      "onions": 1
+    },
+    "time": "08:38 PM",
+    "missing_items": [
+      "relish",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears"
+    ],
+    "extra_items": [
+      "yellow_mustard_sauce",
+      "ketchup_sauce"
+    ],
+    "applied_sauces": [
+      "yellow_mustard_sauce",
+      "ketchup_sauce"
+    ]
+  },
+  {
+    "ticket_id": "V1-05",
+    "status": "completed",
+    "passed": false,
+    "result": "extra item added",
+    "expected_items": [
+      "yellow_mustard_sauce",
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ],
+    "picked_counts": {
+      "yellow_mustard_sauce": 12,
+      "ketchup_sauce": 4
+    },
+    "time": "08:38 PM",
+    "missing_items": [
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears"
+    ],
+    "extra_items": [
+      "yellow_mustard_sauce",
+      "ketchup_sauce"
+    ],
+    "applied_sauces": [
+      "yellow_mustard_sauce",
+      "ketchup_sauce"
+    ]
+  },
+  {
+    "ticket_id": "V1-05",
+    "status": "completed",
+    "passed": false,
+    "result": "extra item added",
+    "expected_items": [
+      "yellow_mustard_sauce",
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ],
+    "picked_counts": {
+      "yellow_mustard_sauce": 12,
+      "ketchup_sauce": 4
+    },
+    "time": "08:38 PM",
+    "missing_items": [
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears"
+    ],
+    "extra_items": [
+      "yellow_mustard_sauce",
+      "ketchup_sauce"
+    ],
+    "applied_sauces": [
+      "yellow_mustard_sauce",
+      "ketchup_sauce"
+    ]
+  },
+  {
+    "ticket_id": "V1-05",
+    "status": "completed",
+    "passed": false,
+    "result": "extra item added",
+    "expected_items": [
+      "yellow_mustard_sauce",
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ],
+    "picked_counts": {
+      "yellow_mustard_sauce": 12,
+      "ketchup_sauce": 4
+    },
+    "time": "08:38 PM",
+    "missing_items": [
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears"
+    ],
+    "extra_items": [
+      "yellow_mustard_sauce",
+      "ketchup_sauce"
+    ],
+    "applied_sauces": [
+      "yellow_mustard_sauce",
+      "ketchup_sauce"
+    ]
+  },
+  {
+    "ticket_id": "V1-05",
+    "status": "completed",
+    "passed": false,
+    "result": "All ingredients are not present",
+    "expected_items": [
+      "yellow_mustard_sauce",
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ],
+    "picked_counts": {
+      "chilli": 1,
+      "grated yellow cheese": 1
+    },
+    "time": "08:38 PM",
+    "missing_items": [
+      "yellow_mustard_sauce",
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ]
+  },
+  {
+    "ticket_id": "V1-05",
+    "status": "completed",
+    "passed": false,
+    "result": "extra item added",
+    "expected_items": [
+      "yellow_mustard_sauce",
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ],
+    "picked_counts": {
+      "yellow_mustard_sauce": 12,
+      "ketchup_sauce": 4
+    },
+    "time": "08:38 PM",
+    "missing_items": [
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears"
+    ],
+    "extra_items": [
+      "yellow_mustard_sauce",
+      "ketchup_sauce"
+    ],
+    "applied_sauces": [
+      "yellow_mustard_sauce",
+      "ketchup_sauce"
+    ]
+  },
+  {
+    "ticket_id": "V1-05",
+    "status": "completed",
+    "passed": false,
+    "result": "All ingredients are not present",
+    "expected_items": [
+      "yellow_mustard_sauce",
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ],
+    "picked_counts": {
+      "chilli": 1,
+      "grated yellow cheese": 1
+    },
+    "time": "08:38 PM",
+    "missing_items": [
+      "yellow_mustard_sauce",
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ]
+  },
+  {
+    "ticket_id": "V1-05",
+    "status": "completed",
+    "passed": false,
+    "result": "All ingredients are not present",
+    "expected_items": [
+      "yellow_mustard_sauce",
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ],
+    "picked_counts": {},
+    "time": "08:38 PM",
+    "missing_items": [
+      "yellow_mustard_sauce",
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ]
+  },
+  {
+    "ticket_id": "V1-05",
+    "status": "completed",
+    "passed": false,
+    "result": "extra item added",
+    "expected_items": [
+      "yellow_mustard_sauce",
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ],
+    "picked_counts": {
+      "yellow_mustard_sauce": 4,
+      "chilli": 2
+    },
+    "time": "08:38 PM",
+    "missing_items": [
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ],
+    "extra_items": [
+      "yellow_mustard_sauce"
+    ],
+    "applied_sauces": [
+      "yellow_mustard_sauce"
+    ]
+  },
+  {
+    "ticket_id": "V1-05",
+    "status": "completed",
+    "passed": false,
+    "result": "extra item added",
+    "expected_items": [
+      "yellow_mustard_sauce",
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ],
+    "picked_counts": {
+      "yellow_mustard_sauce": 7,
+      "ketchup_sauce": 3,
+      "onions": 1
+    },
+    "time": "08:38 PM",
+    "missing_items": [
+      "relish",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears"
+    ],
+    "extra_items": [
+      "yellow_mustard_sauce",
+      "ketchup_sauce"
+    ],
+    "applied_sauces": [
+      "yellow_mustard_sauce",
+      "ketchup_sauce"
+    ]
+  },
+  {
+    "ticket_id": "V1-05",
+    "status": "completed",
+    "passed": false,
+    "result": "extra item added",
+    "expected_items": [
+      "yellow_mustard_sauce",
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ],
+    "picked_counts": {
+      "yellow_mustard_sauce": 12,
+      "ketchup_sauce": 4
+    },
+    "time": "08:38 PM",
+    "missing_items": [
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears"
+    ],
+    "extra_items": [
+      "yellow_mustard_sauce",
+      "ketchup_sauce"
+    ],
+    "applied_sauces": [
+      "yellow_mustard_sauce",
+      "ketchup_sauce"
+    ]
+  },
+  {
+    "ticket_id": "V1-05",
+    "status": "completed",
+    "passed": false,
+    "result": "All ingredients are not present",
+    "expected_items": [
+      "yellow_mustard_sauce",
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ],
+    "picked_counts": {
+      "chilli": 1,
+      "grated yellow cheese": 1
+    },
+    "time": "08:38 PM",
+    "missing_items": [
+      "yellow_mustard_sauce",
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ]
+  },
+  {
+    "ticket_id": "V1-05",
+    "status": "completed",
+    "passed": false,
+    "result": "All ingredients are not present",
+    "expected_items": [
+      "yellow_mustard_sauce",
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ],
+    "picked_counts": {},
+    "time": "08:38 PM",
+    "missing_items": [
+      "yellow_mustard_sauce",
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ]
+  },
+  {
+    "ticket_id": "V1-05",
+    "status": "completed",
+    "passed": false,
+    "result": "extra item added",
+    "expected_items": [
+      "yellow_mustard_sauce",
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ],
+    "picked_counts": {
+      "yellow_mustard_sauce": 4,
+      "chilli": 2
+    },
+    "time": "08:38 PM",
+    "missing_items": [
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ],
+    "extra_items": [
+      "yellow_mustard_sauce"
+    ],
+    "applied_sauces": [
+      "yellow_mustard_sauce"
+    ]
+  },
+  {
+    "ticket_id": "V1-05",
+    "status": "completed",
+    "passed": false,
+    "result": "extra item added",
+    "expected_items": [
+      "yellow_mustard_sauce",
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ],
+    "picked_counts": {
+      "yellow_mustard_sauce": 7,
+      "ketchup_sauce": 3,
+      "onions": 1
+    },
+    "time": "08:38 PM",
+    "missing_items": [
+      "relish",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears"
+    ],
+    "extra_items": [
+      "yellow_mustard_sauce",
+      "ketchup_sauce"
+    ],
+    "applied_sauces": [
+      "yellow_mustard_sauce",
+      "ketchup_sauce"
+    ]
+  },
+  {
+    "ticket_id": "V1-05",
+    "status": "completed",
+    "passed": false,
+    "result": "extra item added",
+    "expected_items": [
+      "yellow_mustard_sauce",
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ],
+    "picked_counts": {
+      "yellow_mustard_sauce": 12,
+      "ketchup_sauce": 4
+    },
+    "time": "08:38 PM",
+    "missing_items": [
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears"
+    ],
+    "extra_items": [
+      "yellow_mustard_sauce",
+      "ketchup_sauce"
+    ],
+    "applied_sauces": [
+      "yellow_mustard_sauce",
+      "ketchup_sauce"
+    ]
+  },
+  {
+    "ticket_id": "V1-05",
+    "status": "completed",
+    "passed": false,
+    "result": "All ingredients are not present",
+    "expected_items": [
+      "yellow_mustard_sauce",
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ],
+    "picked_counts": {
+      "chilli": 1,
+      "grated yellow cheese": 1
+    },
+    "time": "08:38 PM",
+    "missing_items": [
+      "yellow_mustard_sauce",
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ]
+  },
+  {
+    "ticket_id": "V1-05",
+    "status": "completed",
+    "passed": false,
+    "result": "All ingredients are not present",
+    "expected_items": [
+      "yellow_mustard_sauce",
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ],
+    "picked_counts": {},
+    "time": "08:38 PM",
+    "missing_items": [
+      "yellow_mustard_sauce",
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ]
+  },
+  {
+    "ticket_id": "V1-05",
+    "status": "completed",
+    "passed": false,
+    "result": "extra item added",
+    "expected_items": [
+      "yellow_mustard_sauce",
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ],
+    "picked_counts": {
+      "yellow_mustard_sauce": 4,
+      "chilli": 2
+    },
+    "time": "08:38 PM",
+    "missing_items": [
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ],
+    "extra_items": [
+      "yellow_mustard_sauce"
+    ],
+    "applied_sauces": [
+      "yellow_mustard_sauce"
+    ]
+  },
+  {
+    "ticket_id": "V1-05",
+    "status": "completed",
+    "passed": false,
+    "result": "extra item added",
+    "expected_items": [
+      "yellow_mustard_sauce",
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ],
+    "picked_counts": {
+      "yellow_mustard_sauce": 7,
+      "ketchup_sauce": 3,
+      "onions": 1
+    },
+    "time": "08:38 PM",
+    "missing_items": [
+      "relish",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears"
+    ],
+    "extra_items": [
+      "yellow_mustard_sauce",
+      "ketchup_sauce"
+    ],
+    "applied_sauces": [
+      "yellow_mustard_sauce",
+      "ketchup_sauce"
+    ]
+  },
+  {
+    "ticket_id": "V1-05",
+    "status": "completed",
+    "passed": false,
+    "result": "extra item added",
+    "expected_items": [
+      "yellow_mustard_sauce",
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ],
+    "picked_counts": {
+      "yellow_mustard_sauce": 12,
+      "ketchup_sauce": 4
+    },
+    "time": "08:38 PM",
+    "missing_items": [
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears"
+    ],
+    "extra_items": [
+      "yellow_mustard_sauce",
+      "ketchup_sauce"
+    ],
+    "applied_sauces": [
+      "yellow_mustard_sauce",
+      "ketchup_sauce"
+    ]
+  },
+  {
+    "ticket_id": "V1-05",
+    "status": "completed",
+    "passed": false,
+    "result": "All ingredients are not present",
+    "expected_items": [
+      "yellow_mustard_sauce",
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ],
+    "picked_counts": {
+      "chilli": 1,
+      "grated yellow cheese": 1
+    },
+    "time": "08:38 PM",
+    "missing_items": [
+      "yellow_mustard_sauce",
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ]
+  },
+  {
+    "ticket_id": "V1-05",
+    "status": "completed",
+    "passed": false,
+    "result": "All ingredients are not present",
+    "expected_items": [
+      "yellow_mustard_sauce",
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ],
+    "picked_counts": {},
+    "time": "08:38 PM",
+    "missing_items": [
+      "yellow_mustard_sauce",
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ]
+  },
+  {
+    "ticket_id": "V1-05",
+    "status": "completed",
+    "passed": false,
+    "result": "All ingredients are not present",
+    "expected_items": [
+      "yellow_mustard_sauce",
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ],
+    "picked_counts": {
+      "chilli": 1,
+      "grated yellow cheese": 1
+    },
+    "time": "08:38 PM",
+    "missing_items": [
+      "yellow_mustard_sauce",
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ]
+  },
+  {
+    "ticket_id": "V1-05",
+    "status": "completed",
+    "passed": false,
+    "result": "All ingredients are not present",
+    "expected_items": [
+      "yellow_mustard_sauce",
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ],
+    "picked_counts": {},
+    "time": "08:38 PM",
+    "missing_items": [
+      "yellow_mustard_sauce",
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ]
+  },
+  {
+    "ticket_id": "V1-05",
+    "status": "completed",
+    "passed": false,
+    "result": "extra item added",
+    "expected_items": [
+      "yellow_mustard_sauce",
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ],
+    "picked_counts": {
+      "yellow_mustard_sauce": 6,
+      "chilli": 10,
+      "grated yellow cheese": 1
+    },
+    "time": "08:38 PM",
+    "missing_items": [
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ],
+    "extra_items": [
+      "yellow_mustard_sauce"
+    ],
+    "applied_sauces": [
+      "yellow_mustard_sauce"
+    ]
+  },
+  {
+    "ticket_id": "V1-05",
+    "status": "completed",
+    "passed": false,
+    "result": "extra item added",
+    "expected_items": [
+      "yellow_mustard_sauce",
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ],
+    "picked_counts": {
+      "yellow_mustard_sauce": 6,
+      "chilli": 10,
+      "grated yellow cheese": 1
+    },
+    "time": "08:38 PM",
+    "missing_items": [
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ],
+    "extra_items": [
+      "yellow_mustard_sauce"
+    ],
+    "applied_sauces": [
+      "yellow_mustard_sauce"
+    ]
+  }
+]
