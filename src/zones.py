@@ -29,10 +29,16 @@ class ZoneManager:
             )
 
     def get_zone_for_bbox(
-        self, bbox, frame_width: int = 1920, frame_height: int = 1080
+        self, bbox, frame_width: int = 1920, frame_height: int = 1080, is_hand: bool = True
     ) -> Optional[Zone]:
         x1, y1, x2, y2 = bbox
-        cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
+        if is_hand:
+            # Use fingertip working point (75% down hand height) so fingertips dip into correct bin
+            cx = (x1 + x2) // 2
+            cy = int(y1 + (y2 - y1) * 0.75)
+        else:
+            cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
+
         # Normalize point coordinates
         nx, ny = cx / frame_width, cy / frame_height
 

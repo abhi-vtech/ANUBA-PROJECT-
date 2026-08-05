@@ -73,7 +73,10 @@ DEFAULT_ITEM_DWELL_S = 0.5
 DEFAULT_ITEM_DWELL_OVERRIDES = {
     "ketchup_sauce":        0.5,
     "yellow_mustard_sauce": 0.5,
-    "sport_peppers":        3.0,
+    "yellow_cheese":        1.5,
+    "pickle_spears":        0.15,
+    "pickle_rounds":        0.15,
+    "sport_peppers":        1.0,
 }
 
 SAUCE_STRICT_OVERLAP_CLASSES: set[str] = {"ketchup_sauce", "yellow_mustard_sauce"}

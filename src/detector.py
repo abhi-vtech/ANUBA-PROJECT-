@@ -19,6 +19,10 @@ class Detector:
         model_type: Optional[str] = None,
         tracker_type: str = "botsort",
         tracker_config: Optional[str] = None,
+        # Per-class confidence overrides: {class_name: threshold}.
+        # Classes listed here use their own threshold instead of the global
+        # conf_threshold passed to detect().  All other classes are unchanged.
+        class_conf_overrides: Optional[dict] = None,
     ):
         self.device = 0 if torch.cuda.is_available() else "cpu"
         self.model = YOLO(model_path)
@@ -29,6 +33,9 @@ class Detector:
         self.prompt_classes = prompt_classes
         self.model_type = model_type
         self.tracker_type = tracker_type
+        # Per-class confidence overrides (additive — does not affect any
+        # class not explicitly listed here).
+        self.class_conf_overrides: dict = class_conf_overrides or {}
 
         if self.prompt_classes:
             try:
@@ -67,10 +74,18 @@ class Detector:
     def _detect_builtin(
         self, frame: np.ndarray, conf_threshold: float
     ) -> List[Detection]:
+        # Determine the lowest confidence we care about across all classes.
+        # We must pass this to model.track() so YOLO's internal detection
+        # stage does not silently drop classes with per-class overrides
+        # (e.g. "wrapping" at 0.15) before they reach our Python filter.
+        min_conf = min(
+            [conf_threshold] + list(self.class_conf_overrides.values())
+        )
         results = self.model.track(
             frame,
             persist=True,
             verbose=False,
+            conf=min_conf,
             tracker=resource("config/tracker.yaml"),
             device=self.device,
         )
@@ -84,9 +99,16 @@ class Detector:
                 cls = boxes.cls[idx]
                 track_id = int(ids[idx]) if ids is not None else -1
 
-                if float(conf) < conf_threshold:
-                    continue
                 name = self.model.names[int(cls)]
+                # Use per-class override threshold if configured, else the
+                # global conf_threshold.  This allows "wrapping" (and any
+                # other class) to use a lower threshold without affecting
+                # the rest of the pipeline.
+                effective_threshold = self.class_conf_overrides.get(
+                    name, conf_threshold
+                )
+                if float(conf) < effective_threshold:
+                    continue
                 if self.target_classes and name not in self.target_classes:
                     continue
                 detections.append(

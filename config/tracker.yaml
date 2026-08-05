@@ -2,8 +2,11 @@
 tracker_type: bytetrack
 
 # Shared parameters (botsort / bytetrack)
+# Note: track_low_thresh kept at 0.10 (was 0.05) — irrelevant in practice
+# since model.track() is called with conf=0.15; nothing below 0.15 reaches
+# the tracker.  All other values are original defaults.
 track_high_thresh: 0.5
-track_low_thresh: 0.05
+track_low_thresh: 0.10
 new_track_thresh: 0.6
 track_buffer: 300
 match_thresh: 0.5

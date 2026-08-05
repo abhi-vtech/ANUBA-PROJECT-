@@ -1,4 +1,4 @@
-source: videos/order2.mp4
+source: videos/order1.mp4
 
 model_type: yolo
 model_path: rf_trained/weights.pt
@@ -29,6 +29,14 @@ frame_width: 1280
 frame_height: 720
 fps: 30
 confidence_threshold: 0.5
+# Per-class confidence override for the wrapping class.
+# The global threshold (0.5) suppresses most wrapping detections which fire
+# in the 0.10–0.50 range.  This separate threshold lets wrapping through
+# without changing sensitivity for any other class.
+wrapping_conf_threshold: 0.15
+wrapping_dwell_s: 0.4                  # wrapping detection overlap required for "About to Complete" (seconds)
+wrapping_min_closing_frames: 30        # minimum frames "About to Complete" stays active (~1 second)
+wrapping_done_delay_s: 1.0             # delay after hotdog becomes invisible before "Order Done" (seconds)
 kds_mode: mock              # mock | dynamic
 kds_poll: 2                 # seconds between ticket polls (mock mode)
 kds_history: output/orders.jsonl

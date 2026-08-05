@@ -5,6 +5,7 @@ polygons. When both regions move together (correlated direction and magnitude),
 that is evidence of hand-object contact (a real pick). When only the hand moves,
 that is a hover or transient motion.
 
+
 Supports three methods:
 - sparse_lk: Pyramidal Lucas-Kanade on Shi-Tomasi corners (CPU, ~1-2ms/frame)
 - dis_ultrafast: DIS dense flow with ultrafast preset (CPU, ~5-10ms on Jetson)

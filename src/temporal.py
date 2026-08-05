@@ -14,9 +14,23 @@ logger = logging.getLogger(__name__)
 _LADLE_INGREDIENTS: frozenset = frozenset({
     "sauerkraut",
     "yellow cheese (sliced)", "yellow cheese sliced",
-    "pickle swears", "pickel swears", "pickle",
+    "pickle swears", "pickel swears", "pickle", "pickle_spears", "pickle spears",
+    "pickles (spears)", "pickles (rounds)", "pickle_rounds", "pickles",
     "chilli", "chili",
 })
+
+# Items that require the hand to actually reach the assembly zone (or hotdog)
+# before the pick is confirmed.  A bin dwell of ASSEMBLY_CONFIRM_DWELL_MS is
+# required first, then the hand MUST transition to assembly — if the hand
+# leaves the bin without going to assembly the pending pick is silently dropped.
+# This eliminates false picks caused by short hovers over ingredient trays.
+_ASSEMBLY_CONFIRM_INGREDIENTS: frozenset = frozenset({
+    "onions",
+    "diced onions",
+    "diced_onions",
+    "grilled onions",
+})
+ASSEMBLY_CONFIRM_DWELL_MS: int = 1000  # 1 second minimum bin contact
 
 
 def _boxes_overlap(bbox_a, bbox_b) -> bool:
@@ -32,6 +46,7 @@ class PendingPick:
     zone_id: str
     timestamp: float
     centroid: Tuple[float, float]
+    confirmed: bool = True  # False for items that need assembly-entry to confirm
 
 
 @dataclass
@@ -336,8 +351,55 @@ class TemporalTracker:
                     # application is complete (e.g. worker ladles chilli onto a
                     # hotdog that the model didn't detect, then lifts hand away).
                     for pp_zone_id, pp in list(state.pending_picks.items()):
-                        if pp.ingredient.lower() not in _LADLE_INGREDIENTS:
-                            continue
+                        if pp.ingredient.lower() in _LADLE_INGREDIENTS:
+                            elapsed = (now - pp.timestamp) * 1000
+                            actions.append(
+                                Action(
+                                    track_id=det.track_id,
+                                    zone_id=pp.zone_id,
+                                    zone_name=pp.ingredient,
+                                    action_type="pick",
+                                    timestamp=now,
+                                    duration_ms=elapsed,
+                                    from_zone=pp.zone_id,
+                                )
+                            )
+                            actions.append(
+                                Action(
+                                    track_id=det.track_id,
+                                    zone_id="assembly",
+                                    zone_name=pp.ingredient,
+                                    action_type="place",
+                                    timestamp=now,
+                                    duration_ms=0.0,
+                                    from_zone=pp.zone_id,
+                                )
+                            )
+                            logger.debug(
+                                "Ladle ingredient '%s' zone-exit place fired (track=%d)",
+                                pp.ingredient, det.track_id,
+                            )
+                            del state.pending_picks[pp_zone_id]
+                        elif not pp.confirmed:
+                            # Assembly-confirm item (e.g. onions): hand left bin zone
+                            # without reaching assembly — silently drop the pre-pick.
+                            logger.debug(
+                                "Unconfirmed pre-pick for '%s' dropped — hand left bin "
+                                "without reaching assembly (track=%d)",
+                                pp.ingredient, det.track_id,
+                            )
+                            del state.pending_picks[pp_zone_id]
+                    # Left a zone — reset entry time
+                    state.current_zone = None
+                    state.zone_entry_time = now
+                    state.flow_contact_count = 0
+                    state.refresh_state()
+                continue
+
+            if state.current_zone is not None and zone.id != state.current_zone.id:
+                # Zone change — if leaving a bin with pending ladle picks, commit them immediately
+                for pp_zone_id, pp in list(state.pending_picks.items()):
+                    if pp.ingredient.lower() in _LADLE_INGREDIENTS:
                         elapsed = (now - pp.timestamp) * 1000
                         actions.append(
                             Action(
@@ -362,19 +424,11 @@ class TemporalTracker:
                             )
                         )
                         logger.debug(
-                            "Ladle ingredient '%s' zone-exit place fired (track=%d)",
+                            "Ladle ingredient '%s' committed on zone-change (track=%d)",
                             pp.ingredient, det.track_id,
                         )
                         del state.pending_picks[pp_zone_id]
-                    # Left a zone — reset entry time
-                    state.current_zone = None
-                    state.zone_entry_time = now
-                    state.flow_contact_count = 0
-                    state.refresh_state()
-                continue
 
-            if state.current_zone is not None and zone.id != state.current_zone.id:
-                # Zone change
                 state.current_zone = zone
                 state.zone_entry_time = now
                 state.flow_contact_count = 0
@@ -389,6 +443,24 @@ class TemporalTracker:
                     )
                     for pp_zone_id, pp in list(state.pending_picks.items()):
                         elapsed = (now - pp.timestamp) * 1000
+                        if not pp.confirmed:
+                            # Assembly-confirm item (e.g. onions): hand reached assembly.
+                            # NOW fire the pickup action to confirm the pick.
+                            logger.debug(
+                                "Unconfirmed pre-pick for '%s' CONFIRMED by assembly entry "
+                                "(track=%d)",
+                                pp.ingredient, det.track_id,
+                            )
+                            actions.append(
+                                Action(
+                                    track_id=det.track_id,
+                                    zone_id=pp.zone_id,
+                                    zone_name=pp.ingredient,
+                                    action_type="pickup",
+                                    timestamp=now,
+                                    duration_ms=elapsed,
+                                )
+                            )
                         actions.append(
                             Action(
                                 track_id=det.track_id,
@@ -449,67 +521,84 @@ class TemporalTracker:
                         effective_dwell_ms = self.pick_dwell_ms
 
                     if zone.name.lower() == "sauerkraut":
-                        effective_dwell_ms = max(effective_dwell_ms, 1500)
-
-                    # Onions bin is physically close to the assembly area and
-                    # the hand often passes over it in transit.  Require a
-                    # longer dwell to distinguish an intentional pick from
-                    # casual hover or reach-through motion.
-                    if "onion" in zone.name.lower():
-                        effective_dwell_ms = max(effective_dwell_ms, 1500)
+                        effective_dwell_ms = max(effective_dwell_ms, 1000)
 
                     # Chilli bins (zone_12, zone_13): require 800ms dwell threshold
                     # so casual hand transit or quick pass-throughs do not trigger false picks.
                     if "chili" in zone.name.lower() or "chilli" in zone.name.lower():
                         effective_dwell_ms = max(effective_dwell_ms, 325)
 
-                    # Sports wax pepper bin is near other condiment stations and
-                    # the hand frequently passes through.  Require 1500 ms to
-                    # prevent false picks from transit or casual hover.
+                    # Sports wax pepper bin: cap dwell at 1000 ms max.
                     _zone_lower = zone.name.lower()
                     if (
                         "sport" in _zone_lower
                         or "wax pepper" in _zone_lower
                         or ("wax" in _zone_lower and "pepper" in _zone_lower)
                     ):
+                        effective_dwell_ms = max(effective_dwell_ms, 1000)
+
+                    # Yellow cheese (sliced): require 1500ms dwell to prevent false picks from adjacent pickel swears hand overlap.
+                    if "yellow cheese" in _zone_lower or "cheese" in _zone_lower:
                         effective_dwell_ms = max(effective_dwell_ms, 1500)
 
-                    # Pickles (rounds) bin sits adjacent to grated yellow cheese
-                    # and is prone to false triggers from hand overshoot.
-                    # Add 500 ms on top of the 800 ms default = 1300 ms total.
-                    if "pickle" in _zone_lower and "round" in _zone_lower:
-                        effective_dwell_ms = max(effective_dwell_ms, 1300)
+                    # Pickles / pickle spears: reduced to 150 ms for instant & responsive picks.
+                    if "pickle" in _zone_lower or "spear" in _zone_lower or "swear" in _zone_lower:
+                        effective_dwell_ms = 150
 
-                    # Polish hot dog bin: require 1500 ms to distinguish a deliberate pick
-                    # from casual hover or reach-through motion.
+                    # Polish hot dog bin: cap dwell at 1000 ms max.
                     if "polish" in _zone_lower or "hot dog" in _zone_lower:
-                        effective_dwell_ms = max(effective_dwell_ms, 1500)
+                        effective_dwell_ms = max(effective_dwell_ms, 1000)
+
+                    # Onions / diced onions: require 1 second bin dwell AND then hand
+                    # must reach assembly before pick is confirmed.  The pending pick is
+                    # stored as unconfirmed; it will be silently dropped if the hand
+                    # leaves the bin without going to assembly.
+                    is_assembly_confirm = zone.name.lower() in _ASSEMBLY_CONFIRM_INGREDIENTS or "onion" in zone.name.lower()
+                    if is_assembly_confirm:
+                        effective_dwell_ms = max(effective_dwell_ms, ASSEMBLY_CONFIRM_DWELL_MS)
 
                     if elapsed_ms >= effective_dwell_ms and not is_fast:
+                        # For assembly-confirm items: store as unconfirmed (no pickup action yet).
+                        # Pickup will only fire when hand reaches assembly.
+                        needs_assembly_confirm = is_assembly_confirm
                         state.pending_picks[zone.id] = PendingPick(
                             ingredient=zone.name,
                             zone_id=zone.id,
                             timestamp=now,
                             centroid=centroid,
+                            confirmed=not needs_assembly_confirm,
                         )
-                        actions.append(
-                            Action(
-                                track_id=det.track_id,
-                                zone_id=zone.id,
-                                zone_name=zone.name,
-                                action_type="pickup",
-                                timestamp=now,
-                                duration_ms=elapsed_ms,
+                        if not needs_assembly_confirm:
+                            # Normal items: fire pickup immediately as before
+                            actions.append(
+                                Action(
+                                    track_id=det.track_id,
+                                    zone_id=zone.id,
+                                    zone_name=zone.name,
+                                    action_type="pickup",
+                                    timestamp=now,
+                                    duration_ms=elapsed_ms,
+                                )
                             )
-                        )
-                        logger.debug(
-                            "Pick qualified: track=%d zone=%s ingredient=%s, "
-                            "pending_picks=%s",
-                            det.track_id,
-                            zone.id,
-                            zone.name,
-                            list(state.pending_picks.keys()),
-                        )
+                            logger.debug(
+                                "Pick qualified: track=%d zone=%s ingredient=%s, "
+                                "pending_picks=%s",
+                                det.track_id,
+                                zone.id,
+                                zone.name,
+                                list(state.pending_picks.keys()),
+                            )
+                        else:
+                            # Assembly-confirm items: pick is pre-registered but not yet committed.
+                            # It will only count when the hand reaches assembly.
+                            logger.debug(
+                                "Pre-pick (unconfirmed — awaits assembly): track=%d "
+                                "zone=%s ingredient=%s dwell=%.0fms",
+                                det.track_id,
+                                zone.id,
+                                zone.name,
+                                elapsed_ms,
+                            )
                         state.flow_contact_count = 0
                         state.refresh_state()
 
@@ -553,6 +642,24 @@ class TemporalTracker:
                     )
                     for pp_zone_id, pp in list(state.pending_picks.items()):
                         elapsed = (now - pp.timestamp) * 1000
+                        if not pp.confirmed:
+                            # Assembly-confirm item (e.g. onions): hand reached assembly.
+                            # NOW fire the pickup action to confirm the pick.
+                            logger.debug(
+                                "Unconfirmed pre-pick for '%s' CONFIRMED by assembly entry "
+                                "(track=%d)",
+                                pp.ingredient, det.track_id,
+                            )
+                            actions.append(
+                                Action(
+                                    track_id=det.track_id,
+                                    zone_id=pp.zone_id,
+                                    zone_name=pp.ingredient,
+                                    action_type="pickup",
+                                    timestamp=now,
+                                    duration_ms=elapsed,
+                                )
+                            )
                         actions.append(
                             Action(
                                 track_id=det.track_id,

@@ -23,6 +23,8 @@ from src.hotdog_tracker import (
     _shrink_hand_bbox,
     _hand_working_point,
 )
+# ── Wrapping-state order-completion module (additive — do not remove) ──────────
+from src.wrapping_state import WrappingStateMachine
 from src.temporal import TemporalTracker
 from src.zones import ZoneManager
 
@@ -340,6 +342,88 @@ def draw_annotations(frame, detections, zones, current_order):
     return frame
 
 
+# ── Wrapping-state on-screen overlays (additive — do not remove) ───────────────
+from src.wrapping_state import STATE_CLOSING, STATE_DONE  # noqa: E402
+
+def _draw_wrapping_overlays(
+    frame: np.ndarray,
+    frame_idx: int,
+    current_detections: list,
+    wrapping_sm,
+    done_linger_frames: int = 90,   # show DONE banner for ~3 s at 30 fps
+) -> None:
+    """
+    Draw wrapping-state banners on the already-annotated frame.
+    Called AFTER draw_annotations() — purely additive, touches no existing drawing.
+
+    CLOSING hotdog (still visible): amber "About to Complete" banner below its bbox.
+    DONE hotdog (just disappeared): green "Order Done" banner at last known bbox
+                                     shown for done_linger_frames frames then fades.
+    """
+    w_states = wrapping_sm.get_all_states()
+    font = cv2.FONT_HERSHEY_SIMPLEX
+
+    # Build map: raw track_id -> current bbox (hotdogs visible this frame)
+    tid_to_bbox = {
+        det.track_id: det.bbox
+        for det in current_detections
+        if det.class_name == "hot-dog"
+        and getattr(det, "track_id", -1) is not None
+        and getattr(det, "track_id", -1) >= 0
+    }
+
+    for tid, info in w_states.items():
+        state     = info["state"]
+        last_bbox = info.get("last_bbox")
+
+        # ── CLOSING: hotdog is still visible, wrapping present for >= 3 s ─────
+        if state == STATE_CLOSING:
+            bbox = tid_to_bbox.get(tid, last_bbox)
+            if bbox is None:
+                continue
+            x1, y1, x2, y2 = bbox
+            label  = "About to Complete"
+            txt_color = (255, 255, 255)
+            bg_color  = (0, 100, 220)     # deep amber-blue
+            bdr_color = (0, 180, 255)     # bright orange
+
+            (lw, lh), _ = cv2.getTextSize(label, font, 0.58, 2)
+            bx1, by1 = x1, y2 + 4
+            bx2, by2 = x1 + lw + 14, y2 + lh + 18
+            cv2.rectangle(frame, (bx1, by1), (bx2, by2), bg_color, -1)
+            cv2.rectangle(frame, (bx1, by1), (bx2, by2), bdr_color, 2)
+            cv2.putText(frame, label, (bx1 + 7, by2 - 6), font, 0.58, txt_color, 2, cv2.LINE_AA)
+
+        # ── DONE: hotdog gone — draw fading banner at last known position ──────
+        elif state == STATE_DONE:
+            if last_bbox is None:
+                continue
+            done_frame = info.get("done_frame")
+            if done_frame is None:
+                continue
+            elapsed_frames = frame_idx - done_frame
+            if elapsed_frames > done_linger_frames:
+                continue
+            # Fade from 1.0 to 0.0 over the linger window
+            alpha = max(0.1, 1.0 - elapsed_frames / done_linger_frames)
+
+            x1, y1, x2, y2 = last_bbox
+            label  = "Order Done!"
+            bg_color  = (20, 130, 20)     # dark green
+            bdr_color = (50, 230, 50)     # bright green
+            txt_color = (255, 255, 255)
+
+            (lw, lh), _ = cv2.getTextSize(label, font, 0.65, 2)
+            cy = (y1 + y2) // 2
+
+            overlay = frame.copy()
+            cv2.rectangle(overlay, (x1, y1), (x2, y2), bdr_color, 3)
+            cv2.rectangle(overlay, (x1, cy - lh - 8), (x1 + lw + 14, cy + 10), bg_color, -1)
+            cv2.putText(overlay, label, (x1 + 7, cy + 4), font, 0.65, txt_color, 2, cv2.LINE_AA)
+            cv2.addWeighted(overlay, alpha, frame, 1.0 - alpha, 0, frame)
+
+
+
 def _env(key, default=None, cast=None):
     val = os.environ.get(key)
     if val is None:
@@ -411,6 +495,16 @@ def main():
         model_type=model_type,
         tracker_type=tracker_type,
         tracker_config=resource("config/tracker.yaml"),
+        # Lower confidence threshold for the wrapping class so it is not
+        # suppressed by the global 0.50 gate.  Configurable via
+        # wrapping_conf_threshold in model.yaml.  All other classes are
+        # unaffected (additive — do not remove).
+        class_conf_overrides={
+            "wrapping": float(_env(
+                "WRAPPING_CONF_THRESHOLD",
+                config.get("wrapping_conf_threshold", 0.15),
+            )),
+        },
     )
     zones = ZoneManager(resource("config/zones.json"))
 
@@ -459,7 +553,7 @@ def main():
         orphan_timeout_s=float(_env("HOTDOG_ORPHAN_TIMEOUT", orphan_timeout_s)),
         spatial_lock_radius=float(_env("HOTDOG_SPATIAL_LOCK_RADIUS", 300.0)),
         item_dwell_s=float(_env("HOTDOG_ITEM_DWELL_S",
-                                config.get("hotdog_item_dwell_s", 1.5))),
+                                config.get("hotdog_item_dwell_s", 0.5))),
         min_sauce_aspect=float(_env("HOTDOG_MIN_SAUCE_ASPECT",
                                     config.get("hotdog_min_sauce_aspect_ratio", 1.2))),
         min_sauce_height=int(_env("HOTDOG_MIN_SAUCE_HEIGHT_PX",
@@ -496,18 +590,9 @@ def main():
     )
     state_machine.set_kds_client(kds)
 
-    video_playlist = [
-        "videos/order1.mp4",
-        "videos/order2.mp4",
-        "videos/order3.mp4",
-        "videos/order4.mp4",
-        "videos/order5.mp4"
-    ]
+    # Run ONLY the video specified in config/model.yaml (or VIDEO_SOURCE env var)
+    video_playlist = [source]
     current_video_idx = 0
-    try:
-        current_video_idx = video_playlist.index(source)
-    except ValueError:
-        pass
 
     capture = VideoCaptureThread(
         source,
@@ -537,6 +622,13 @@ def main():
     _sauce_applied = {}
     _sauce_last_fired = {}
     SAUCE_COOLDOWN_S = 0.7   # balanced cooldown for fast sauce passes
+
+    # ── Wrapping-state machine (additive — do not remove) ──────────────────────
+    wrapping_sm = WrappingStateMachine(
+        wrapping_dwell_s=float(_env("WRAPPING_DWELL_S", config.get("wrapping_dwell_s", 0.4))),
+        min_closing_frames=int(_env("WRAPPING_MIN_CLOSING_FRAMES", config.get("wrapping_min_closing_frames", 30))),
+        done_delay_s=float(_env("WRAPPING_DONE_DELAY_S", config.get("wrapping_done_delay_s", 1.0))),
+    )
     SAUCE_MIN_FRAMES = 1     # 1 frame accumulation for responsive detection
 
     try:
@@ -838,7 +930,7 @@ def main():
             # Use the hand's working-point (bottom-centre of shrunk bbox) to find
             # the nearest active hotdog ID and commit the item/sauce directly.
             for action in actions:
-                if action.action_type in ("pick", "place", "sauce"):
+                if action.action_type in ("pick", "place", "pickup", "sauce"):
                     firing_hand = next(
                         (h for h in hand_detections if h.track_id == action.track_id),
                         hand_detections[0] if hand_detections else None,
@@ -906,6 +998,50 @@ def main():
                 active_ticket_id=active_ticket_id,
             )
 
+            is_ending_soon = False
+            if capture._is_file_source:
+                total_frames = capture.cap.get(cv2.CAP_PROP_FRAME_COUNT)
+                current_frame = capture.cap.get(cv2.CAP_PROP_POS_FRAMES)
+                video_fps = capture.cap.get(cv2.CAP_PROP_FPS)
+                if video_fps > 0 and total_frames > 0 and current_frame > 10:
+                    remaining_s = (total_frames - current_frame) / video_fps
+                    if remaining_s <= 0.8:
+                        is_ending_soon = True
+
+            # ── Wrapping-state update (additive — do not remove) ───────────────
+            _wrapping_events = wrapping_sm.update(
+                frame_idx=frame_count,
+                current_time=current_time,
+                hotdog_detections=[d for d in detections if d.class_name == "hot-dog"],
+                wrapping_detections=[d for d in detections if d.class_name == "wrapping"],
+                video_ending_soon=is_ending_soon,
+            )
+            # Print state transitions to terminal immediately for visibility
+            for _ev in _wrapping_events:
+                if _ev["event"] == "closing":
+                    if state_machine.current_order:
+                        state_machine.current_order.ending_soon = True
+                    add_event("hover", zone="wrapping", item="about_to_complete", duration=0.4)
+                    print(
+                        f"\n{'='*54}\n"
+                        f"  [WRAPPING] hotdog tid={_ev['hotdog_tid']}  →  ABOUT TO COMPLETE\n"
+                        f"  frame={_ev['frame']}  t={_ev['timestamp']:.2f}s  "
+                        f"dwell={_ev.get('wrapping_dwell_s', '?')}s\n"
+                        f"{'='*54}",
+                        flush=True,
+                    )
+                elif _ev["event"] == "done":
+                    if state_machine.current_order:
+                        state_machine.current_order.ending_soon = False
+                    add_event("place", zone="assembly", item="wrapped_hotdog", duration=1.0)
+                    print(
+                        f"\n{'='*54}\n"
+                        f"  [WRAPPING] hotdog tid={_ev['hotdog_tid']}  →  ORDER DONE ✓\n"
+                        f"  frame={_ev['frame']}  t={_ev['timestamp']:.2f}s\n"
+                        f"{'='*54}",
+                        flush=True,
+                    )
+
             # POS / KDS Fusion Mismatch Validation (throttled alert)
             if state_machine.current_ticket:
                 t_id = state_machine.current_ticket.ticket_id
@@ -937,6 +1073,12 @@ def main():
             draw_annotations._current_video_time = current_time
             annotated = draw_annotations(
                 frame.copy(), visible_detections, zones, state_machine.get_current_order()
+            )
+            # ── Wrapping-state overlays (additive — do not remove) ────────────
+            # Draws "About to Complete" and "Order Done" banners on the frame
+            # AFTER existing annotations, so nothing existing is overwritten.
+            _draw_wrapping_overlays(
+                annotated, frame_count, detections, wrapping_sm
             )
             update_frame_data(
                 annotated,
