@@ -1413,6 +1413,80 @@ class HotdogTracker:
         now = self._last_time if self._last_time is not None else time.time()
         result = {}
         all_recs = {**self._records, **self._retired_records}
+        
+        import os
+        multi_id = os.environ.get("MULTI_ID", "false").lower() in ("1", "true", "yes")
+        
+        if not multi_id and all_recs:
+            # Single ID mode: merge all records into ID "1"
+            merged_rec = {
+                "track_id": 1,
+                "hotdog_id": "1",
+                "order_id": None,
+                "status": "idle",
+                "items_added": [],
+                "item_names": [],
+                "item_counts": {},
+                "active": False,
+                "retired": False,
+                "is_coasting": False,
+                "first_seen": None,
+                "last_seen": None,
+                "start_time_s": None,
+                "start_time_str": None,
+                "end_time_s": None,
+                "end_time_str": None,
+                "wrapping_dwell_start": None,
+                "wrapping_closing_time": None,
+                "wrapping_done_time": None,
+                "time_since_disappeared": 0.0,
+                "bbox": None,
+                "trail": []
+            }
+            
+            for tid, rec in sorted(all_recs.items(), key=lambda x: x[1].first_seen if x[1].first_seen else 0):
+                time_since_disappeared = max(0.0, now - rec.last_seen)
+                active = (not rec.retired) and (time_since_disappeared <= 1.0)
+                
+                if merged_rec["first_seen"] is None or (rec.first_seen and rec.first_seen < merged_rec["first_seen"]):
+                    merged_rec["first_seen"] = rec.first_seen
+                    start_ts = rec.first_seen
+                    merged_rec["start_time_s"] = round(start_ts, 2) if start_ts is not None else None
+                    merged_rec["start_time_str"] = format_time_str(start_ts)
+                
+                if merged_rec["last_seen"] is None or (rec.last_seen and rec.last_seen > merged_rec["last_seen"]):
+                    merged_rec["last_seen"] = rec.last_seen
+                    merged_rec["time_since_disappeared"] = round(time_since_disappeared, 3)
+                
+                merged_rec["active"] = merged_rec["active"] or active
+                merged_rec["retired"] = rec.retired if not active else False
+                merged_rec["is_coasting"] = merged_rec["is_coasting"] or rec.is_coasting
+                
+                if rec.status != "idle":
+                    merged_rec["status"] = rec.status
+                if rec.order_id:
+                    merged_rec["order_id"] = rec.order_id
+                
+                merged_rec["items_added"].extend(rec.items_added)
+                merged_rec["item_names"].extend(rec.item_names)
+                for k, v in rec._item_counts.items():
+                    merged_rec["item_counts"][k] = merged_rec["item_counts"].get(k, 0) + v
+                
+                if rec.wrapping_dwell_start: merged_rec["wrapping_dwell_start"] = rec.wrapping_dwell_start
+                if rec.wrapping_closing_time: merged_rec["wrapping_closing_time"] = rec.wrapping_closing_time
+                if rec.wrapping_done_time:
+                    merged_rec["wrapping_done_time"] = rec.wrapping_done_time
+                    end_ts = rec.wrapping_done_time
+                    merged_rec["end_time_s"] = round(end_ts, 2)
+                    merged_rec["end_time_str"] = format_time_str(end_ts)
+                
+                if active or merged_rec["bbox"] is None:
+                    merged_rec["bbox"] = rec.bbox
+                merged_rec["trail"].extend(rec.trail)
+            
+            result[1] = merged_rec
+            return result
+
         for tid, rec in all_recs.items():
             time_since_disappeared = max(0.0, now - rec.last_seen)
             active = (not rec.retired) and (time_since_disappeared <= 1.0)
@@ -1452,6 +1526,96 @@ class HotdogTracker:
         hotdogs_list = []
         item_timeline = []
         all_recs = {**self._records, **self._retired_records}
+
+        import os
+        multi_id = os.environ.get("MULTI_ID", "false").lower() in ("1", "true", "yes")
+
+        if not multi_id and all_recs:
+            # Single ID mode: merge all records into a single order1
+            merged_rec = {
+                "track_id": 1,
+                "hotdog_id": "1",
+                "order_id": None,
+                "status": "idle",
+                "items_added": [],
+                "item_names": [],
+                "item_counts": {},
+                "active": False,
+                "retired": False,
+                "is_coasting": False,
+                "first_seen": None,
+                "last_seen": None,
+                "start_time_s": None,
+                "start_time_str": None,
+                "end_time_s": None,
+                "end_time_str": None,
+                "wrapping_dwell_start": None,
+                "wrapping_closing_time": None,
+                "wrapping_done_time": None,
+                "time_since_disappeared": 0.0,
+                "bbox": None,
+                "trail": []
+            }
+            
+            # Use same merge logic as get_hotdog_log
+            now = self._last_time if self._last_time is not None else time.time()
+            for tid, rec in sorted(all_recs.items(), key=lambda x: x[1].first_seen if x[1].first_seen else 0):
+                time_since_disappeared = max(0.0, now - rec.last_seen)
+                active = (not rec.retired) and (time_since_disappeared <= 1.0)
+                if merged_rec["first_seen"] is None or (rec.first_seen and rec.first_seen < merged_rec["first_seen"]):
+                    merged_rec["first_seen"] = rec.first_seen
+                    merged_rec["start_time_s"] = round(rec.first_seen, 2)
+                    merged_rec["start_time_str"] = format_time_str(rec.first_seen)
+                if merged_rec["last_seen"] is None or (rec.last_seen and rec.last_seen > merged_rec["last_seen"]):
+                    merged_rec["last_seen"] = rec.last_seen
+                    merged_rec["time_since_disappeared"] = round(time_since_disappeared, 3)
+                merged_rec["active"] = merged_rec["active"] or active
+                merged_rec["retired"] = rec.retired if not active else False
+                merged_rec["is_coasting"] = merged_rec["is_coasting"] or rec.is_coasting
+                if rec.status != "idle": merged_rec["status"] = rec.status
+                if rec.order_id: merged_rec["order_id"] = rec.order_id
+                
+                # Merge items safely to avoid duplicates if tracking dropped mid-addition
+                for item_event in rec.items_added:
+                    # Avoid duplicate items with very close timestamps
+                    is_dup = False
+                    for existing in merged_rec["items_added"]:
+                        if existing["item"] == item_event["item"] and abs(existing["timestamp"] - item_event["timestamp"]) < 1.0:
+                            is_dup = True
+                            break
+                    if not is_dup:
+                        merged_rec["items_added"].append(item_event)
+                        merged_rec["item_names"].append(item_event["item"])
+                        merged_rec["item_counts"][item_event["item"]] = merged_rec["item_counts"].get(item_event["item"], 0) + 1
+                        
+                        item_timeline.append({
+                            "hotdog_id": "1",
+                            "item": item_event["item"],
+                            "timestamp": item_event["timestamp"],
+                            "time_str": item_event.get("time_str", format_time_str(item_event["timestamp"]))
+                        })
+                
+                if rec.wrapping_dwell_start: merged_rec["wrapping_dwell_start"] = rec.wrapping_dwell_start
+                if rec.wrapping_closing_time: merged_rec["wrapping_closing_time"] = rec.wrapping_closing_time
+                if rec.wrapping_done_time:
+                    merged_rec["wrapping_done_time"] = rec.wrapping_done_time
+                    merged_rec["end_time_s"] = round(rec.wrapping_done_time, 2)
+                    merged_rec["end_time_str"] = format_time_str(rec.wrapping_done_time)
+                if active or merged_rec["bbox"] is None:
+                    merged_rec["bbox"] = rec.bbox
+
+            orders["order1"] = merged_rec
+            hotdogs_list.append(merged_rec)
+            
+            # Sort timeline
+            item_timeline.sort(key=lambda x: x["timestamp"])
+            
+            return {
+                "total_hotdogs": 1,
+                "hotdogs": hotdogs_list,
+                "orders": orders,
+                "timeline": item_timeline
+            }
 
         # Sort hotdogs by first_seen and track_id for deterministic order
         sorted_recs = sorted(all_recs.items(), key=lambda item: (item[1].first_seen, item[0]))

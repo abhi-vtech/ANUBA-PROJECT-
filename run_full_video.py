@@ -47,7 +47,7 @@ DEFAULT_TIMELINE_PATH = os.path.join(OUTPUT_DIR, "hotdog_timeline.json")
 # Candidate 1-hour video filenames in order of preference
 ONE_HOUR_CANDIDATES = [
     
-    "Wienerschnitzel_Sacramento_CA_95818__camB__2026_07_04_12_to_13_PDT.mkv",
+    "Wienerschnitzel_Sacramento_CA_95818__camA__2026_07_04_14_to_15_PDT.mkv",
     
 ]
 
@@ -169,6 +169,7 @@ def main():
     env["VIDEO_SOURCE"] = video_path
     env["EXIT_ON_END"] = "true"
     env["LOG_LEVEL"] = "INFO"
+    env["MULTI_ID"] = "true"
 
     # Launch main pipeline as subprocess
     process = subprocess.Popen(

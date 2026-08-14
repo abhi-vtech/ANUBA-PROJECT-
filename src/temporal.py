@@ -381,14 +381,14 @@ class TemporalTracker:
                             )
                             del state.pending_picks[pp_zone_id]
                         elif not pp.confirmed:
-                            # Assembly-confirm item (e.g. onions): hand left bin zone
-                            # without reaching assembly — silently drop the pre-pick.
+                            # Assembly-confirm item (e.g. onions): hand left bin zone.
+                            # We DO NOT delete it immediately; we let it survive during transit
+                            # across 'None' space. It will timeout naturally via transition_timeout_ms
+                            # if it doesn't reach the assembly zone.
                             logger.debug(
-                                "Unconfirmed pre-pick for '%s' dropped — hand left bin "
-                                "without reaching assembly (track=%d)",
+                                "Unconfirmed pre-pick for '%s' kept alive during transit (track=%d)",
                                 pp.ingredient, det.track_id,
                             )
-                            del state.pending_picks[pp_zone_id]
                     # Left a zone — reset entry time
                     state.current_zone = None
                     state.zone_entry_time = now
@@ -555,7 +555,10 @@ class TemporalTracker:
                     # leaves the bin without going to assembly.
                     is_assembly_confirm = zone.name.lower() in _ASSEMBLY_CONFIRM_INGREDIENTS or "onion" in zone.name.lower()
                     if is_assembly_confirm:
-                        effective_dwell_ms = max(effective_dwell_ms, ASSEMBLY_CONFIRM_DWELL_MS)
+                        if state.flow_contact_count >= self.flow_contact_threshold:
+                            effective_dwell_ms = 400  # Quick scoop with confirmed motion
+                        else:
+                            effective_dwell_ms = 1500 # High dwell if just hovering/resting
 
                     if elapsed_ms >= effective_dwell_ms and not is_fast:
                         # For assembly-confirm items: store as unconfirmed (no pickup action yet).

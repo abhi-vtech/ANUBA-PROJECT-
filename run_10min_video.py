@@ -72,6 +72,7 @@ def main():
     env["EXIT_ON_END"] = "true"
     # Ensure INFO-level log events (metrics, hotdog_summary) pass through stdout
     env["LOG_LEVEL"] = "INFO"
+    env["MULTI_ID"] = "true"
 
     # ──────────────────────────────────────────────────────────────────────
     # Launch the main pipeline

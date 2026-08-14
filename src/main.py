@@ -355,7 +355,6 @@ def draw_annotations(frame, detections, zones, current_order):
                 if not any(mono == raw_tid for mono in detector_id_map.values() if mono != raw_tid):
                     matched_rec = hotdog_log[raw_tid]
 
-            # Only show hotdog ID just like #1 (not name or text)
             if matched_rec:
                 hid = matched_rec.get("hotdog_id")
             elif raw_tid is not None and raw_tid in detector_id_map:
@@ -364,6 +363,10 @@ def draw_annotations(frame, detections, zones, current_order):
                 hid = str(raw_tid)
             else:
                 hid = "1"
+
+            if os.environ.get("MULTI_ID", "false").lower() not in ("1", "true", "yes"):
+                hid = "1"
+            
             label_text = f"#{hid}"
 
             # Draw distinct hot-dog bounding box & compact ID header (#1)
@@ -1219,7 +1222,7 @@ def main():
                             hand_working_pt=hwpt,
                             item_class=action.zone_name,
                             now=current_time,
-                            max_radius=300,
+                            max_radius=600,
                             is_sauce=(action.action_type == "sauce"),
                         )
                         if committed_tid is not None:
