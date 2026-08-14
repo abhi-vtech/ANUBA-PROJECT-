@@ -17,7 +17,7 @@ class Detector:
         target_classes=None,
         prompt_classes: Optional[List[str]] = None,
         model_type: Optional[str] = None,
-        tracker_type: str = "botsort",
+        tracker_type: str = "bytetrack",
         tracker_config: Optional[str] = None,
         # Per-class confidence overrides: {class_name: threshold}.
         # Classes listed here use their own threshold instead of the global
@@ -156,6 +156,7 @@ class Detector:
                             confidence=float(conf),
                         )
                     )
+
         return detections
 
     def _detect_deepsort(

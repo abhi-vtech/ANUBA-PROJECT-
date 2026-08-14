@@ -16,11 +16,12 @@ treated as a lost/occluded track — it is NOT marked DONE.
 
 Trigger logic (ACTIVE → CLOSING)
 ─────────────────────────────────
-• Any wrapping bbox that intersects the hotdog bbox (even partially) starts /
-  maintains the dwell timer for that hotdog.
-• If no wrapping bbox intersects for more than WRAPPING_GAP_RESET_S seconds,
-  the timer resets (handles brief detection gaps at the model level).
-• Once the timer reaches WRAPPING_DWELL_S (default 3.0 s), the hotdog
+• A wrapping bbox must cover at least MIN_COVERAGE_RATIO (default 70 %) of
+  the hotdog bbox area to start / maintain the dwell timer for that hotdog.
+  Partial / edge intersections below this threshold are ignored.
+• If no wrapping bbox meets the coverage threshold for more than
+  WRAPPING_GAP_RESET_S seconds, the timer resets (handles brief gaps).
+• Once the timer reaches WRAPPING_DWELL_S (default 0.4 s), the hotdog
   transitions to CLOSING — "order about to complete".
 
 Trigger logic (CLOSING → DONE)
@@ -77,7 +78,8 @@ def _hotdog_coverage_ratio(
 ) -> float:
     """
     Return the fraction of the *hotdog* bbox area covered by the wrapping bbox.
-    Kept for introspection / debugging; not used in the core state transitions.
+    Used as the primary gate in ACTIVE → CLOSING transitions: the wrapping must
+    cover at least min_coverage_ratio (default 0.70) of the hotdog bbox.
     """
     hx1, hy1, hx2, hy2 = hotdog_bbox
     wx1, wy1, wx2, wy2 = wrapping_bbox
@@ -141,9 +143,10 @@ class WrappingStateMachine:
     def __init__(
         self,
         wrapping_dwell_s: float = 0.4,
-        wrapping_gap_reset_s: float = 1.0,
+        wrapping_gap_reset_s: float = 2.0,
         min_closing_frames: int = 30,
         done_delay_s: float = 1.0,
+        min_coverage_ratio: float = 0.25,
     ) -> None:
         """
         Parameters
@@ -151,16 +154,20 @@ class WrappingStateMachine:
         wrapping_dwell_s      : seconds wrapping must be present before CLOSING
                                 (default 0.4 s / 400 ms)
         wrapping_gap_reset_s  : gap longer than this resets the dwell timer
-                                (default 1.0 s — handles brief detector misses)
+                                (default 2.0 s — handles brief detector misses during fast moves)
         min_closing_frames    : minimum frames CLOSING state remains active
                                 before transitioning to DONE (default 30 frames / ~1s)
         done_delay_s          : seconds hotdog must remain invisible after CLOSING
                                 before transitioning to DONE (default 1.0 s delay)
+        min_coverage_ratio    : fraction of the hotdog bbox that must be covered
+                                by the wrapping bbox to count as a valid overlap
+                                (default 0.25 = 25 %).
         """
         self.wrapping_dwell_s     = wrapping_dwell_s
         self.wrapping_gap_reset_s = wrapping_gap_reset_s
         self.min_closing_frames   = min_closing_frames
         self.done_delay_s         = done_delay_s
+        self.min_coverage_ratio   = min_coverage_ratio
 
         # Permanent retirement set — persists for the full run.
         self.done_ids: Set[int] = set()
@@ -225,24 +232,39 @@ class WrappingStateMachine:
             rec = self._states[tid]
             rec.last_bbox = bbox
 
+            # Fix F: once DONE, permanently clamp — no wrapping logic should re-open it.
+            if rec.state == STATE_DONE:
+                continue
+
             # CLOSING / DONE states need no wrapping-overlap processing here
             if rec.state != STATE_ACTIVE:
                 continue
 
-            # ── Check whether any wrapping bbox overlaps this hotdog ──────────
-            wrapping_overlaps = any(
-                _boxes_intersect(bbox, wb) for wb in wrapping_bboxes
-            )
+            # ── Check whether any wrapping bbox covers >= min_coverage_ratio
+            # of this hotdog bbox (default 70 %).  Any partial intersection
+            # below this threshold is ignored to prevent premature CLOSING.
+            best_coverage = 0.0
+            for wb in wrapping_bboxes:
+                coverage = _hotdog_coverage_ratio(bbox, wb)
+                if coverage > best_coverage:
+                    best_coverage = coverage
+
+            wrapping_overlaps = best_coverage >= self.min_coverage_ratio
 
             if wrapping_overlaps:
                 if rec.wrapping_dwell_start is None:
-                    # First frame wrapping is seen near this hotdog
+                    # First frame wrapping coverage threshold is met for this hotdog
                     rec.wrapping_dwell_start = current_time
                     logger.debug(
-                        "[WRAPPING] hotdog tid=%d  wrapping dwell started  t=%.2fs",
-                        tid, current_time,
+                        "[WRAPPING] hotdog tid=%d  dwell started  coverage=%.0f%%  t=%.2fs",
+                        tid, best_coverage * 100, current_time,
                     )
                 rec.wrapping_last_seen = current_time
+
+                logger.debug(
+                    "[WRAPPING] hotdog tid=%d  coverage=%.0f%% >= %.0f%% threshold",
+                    tid, best_coverage * 100, self.min_coverage_ratio * 100,
+                )
 
                 # ── Check if dwell threshold has been reached ─────────────────
                 dwell_elapsed = current_time - rec.wrapping_dwell_start
@@ -254,9 +276,9 @@ class WrappingStateMachine:
                     logger.info(
                         "[WRAPPING] hotdog tid=%d  ACTIVE → CLOSING  "
                         "frame=%d  t=%.2fs  "
-                        "(wrapping present for %.1fs >= %.1fs threshold)",
+                        "(wrapping coverage=%.0f%%  present for %.1fs >= %.1fs threshold)",
                         tid, frame_idx, current_time,
-                        dwell_elapsed, self.wrapping_dwell_s,
+                        best_coverage * 100, dwell_elapsed, self.wrapping_dwell_s,
                     )
                     events.append({
                         "event":            "closing",
@@ -264,10 +286,16 @@ class WrappingStateMachine:
                         "frame":            frame_idx,
                         "timestamp":        current_time,
                         "wrapping_dwell_s": round(dwell_elapsed, 2),
+                        "coverage_pct":     round(best_coverage * 100, 1),
                     })
 
             else:
-                # No wrapping overlap this frame — check if gap is too long
+                # Coverage below threshold this frame — check if gap is too long
+                if best_coverage > 0.0:
+                    logger.debug(
+                        "[WRAPPING] hotdog tid=%d  coverage=%.0f%% < %.0f%% threshold — ignored",
+                        tid, best_coverage * 100, self.min_coverage_ratio * 100,
+                    )
                 if (
                     rec.wrapping_last_seen is not None
                     and (current_time - rec.wrapping_last_seen)
@@ -381,6 +409,67 @@ class WrappingStateMachine:
         if rec is None or rec.wrapping_dwell_start is None:
             return 0.0
         return max(0.0, current_time - rec.wrapping_dwell_start)
+
+    def register_wrap_zone_track(self, hotdog_tid: int, current_time: float) -> None:
+        """
+        Fix E — Immediately register a newly-spawned track that was created inside
+        the wrap/assembly ROI so it is evaluated from frame 1.
+
+        Calling this ensures that even if the first ``update()`` frame containing
+        a ``wrapping`` detection arrives in the same batch as the new hotdog
+        detection, the dwell timer and per-ID state are already initialised and
+        the track will not be skipped or evaluated on a stale "first-seen" basis.
+
+        Safe to call even if the track is already registered (no-op in that case).
+        """
+        if hotdog_tid in self.done_ids:
+            return  # already permanently retired
+        if hotdog_tid not in self._states:
+            self._states[hotdog_tid] = _HotdogWrapState(hotdog_tid=hotdog_tid)
+            logger.debug(
+                "[WRAPPING] register_wrap_zone_track: tid=%d registered immediately at t=%.2fs",
+                hotdog_tid, current_time,
+            )
+
+    def transfer_dwell_state(self, from_tid: int, to_tid: int) -> None:
+        """
+        Fix G — Copy the wrapping dwell timer from *from_tid* to *to_tid*.
+
+        Called by HotdogTracker.merge_wrap_zone_fragment() (or the caller of that
+        method) immediately after a wrap-zone merge so the merged track starts
+        its dwell evaluation from the accumulated elapsed, not from zero.
+
+        No-op if *from_tid* has no state or is already CLOSING/DONE
+        (those states don't need dwell transfer).
+        """
+        src = self._states.get(from_tid)
+        if src is None or src.state != STATE_ACTIVE:
+            return  # nothing useful to transfer
+
+        # Ensure destination record exists
+        if to_tid not in self._states:
+            self._states[to_tid] = _HotdogWrapState(hotdog_tid=to_tid)
+
+        dst = self._states[to_tid]
+        if dst.state != STATE_ACTIVE:
+            return  # destination already past ACTIVE; nothing to do
+
+        # Transfer dwell start and last-seen timestamps
+        if src.wrapping_dwell_start is not None:
+            # Preserve whichever start is earlier (most accumulated dwell wins)
+            if dst.wrapping_dwell_start is None or src.wrapping_dwell_start < dst.wrapping_dwell_start:
+                dst.wrapping_dwell_start = src.wrapping_dwell_start
+        if src.wrapping_last_seen is not None:
+            if dst.wrapping_last_seen is None or src.wrapping_last_seen > dst.wrapping_last_seen:
+                dst.wrapping_last_seen = src.wrapping_last_seen
+
+        logger.info(
+            "[WRAPPING] transfer_dwell_state: tid=%d → tid=%d  "
+            "dwell_start=%.2f  last_seen=%.2f",
+            from_tid, to_tid,
+            dst.wrapping_dwell_start or 0.0,
+            dst.wrapping_last_seen or 0.0,
+        )
 
     def get_all_states(self) -> Dict[int, dict]:
         """

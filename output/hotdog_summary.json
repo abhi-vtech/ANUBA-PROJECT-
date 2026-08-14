@@ -1,12 +1,16 @@
 {
   "video": "wienerschnitzel_10m.mkv",
-  "run_duration_s": 1362.1,
+  "run_duration_s": 160.4,
   "total_hotdogs": 0,
+  "completed_hotdogs": 0,
+  "in_progress_hotdogs": 0,
   "total_orders_processed": 0,
   "passed_orders": 0,
   "failed_orders": 0,
   "accuracy_pct": 0.0,
   "detections_by_class": {},
+  "hotdogs": [],
   "item_timeline": [],
-  "orders": {}
+  "orders": {},
+  "regression_metrics": {}
 }

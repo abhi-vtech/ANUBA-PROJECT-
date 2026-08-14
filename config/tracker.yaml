@@ -8,7 +8,7 @@ tracker_type: bytetrack
 track_high_thresh: 0.5
 track_low_thresh: 0.10
 new_track_thresh: 0.6
-track_buffer: 300
+track_buffer: 3600
 match_thresh: 0.5
 fuse_score: True
 
@@ -44,6 +44,23 @@ optical_flow:
   flow_contact_threshold: 2        # Consecutive contact frames needed for confirmation
   lk_window_size: 21               # LK flow window size (odd number)
   lk_max_level: 3                  # LK pyramid levels
+
+# ── Wrap-station ROI overrides ────────────────────────────────────────────────
+# Applied by HotdogTracker when a hotdog centroid is inside the assembly/wrap zone.
+# These override the global ByteTrack params for tracks inside that zone only.
+wrap_station:
+  track_high_thresh: 0.35     # accept partial detections during hand-cover
+  track_low_thresh: 0.08      # floor for low-conf second-pass matches
+  match_thresh: 0.80          # relaxed IoU gate for fast wrap-arm sweeps
+  spatial_lock_radius: 450    # expanded lock radius for fast hand sweeps & movements
+  occlusion_buffer_s: 20.0    # coast 20 s (≈600 frames) before retiring in wrap zone
+  hand_transit_reid_enabled: true  # Hand-transition in-flight occlusion transfer re-ID
+  hand_transit_max_gap_s: 60.0     # Max transit gap (seconds) across hand relocations
+  stall_watchdog_window_s: 20.0   # merge window after retire → new-spawn in same zone
+  max_hand_speed_px_per_frame: 55.0 # Max plausible hand travel speed (px/frame)
+  hand_lost_timeout_frames: 180   # Max frames a hand-lost hotdog can stay pending
+  hand_assoc_frame_window: 5      # Frame window for hand contact association
+  base_hand_displacement_px: 300.0 # Base placement radius around hand origin
 
 # Trajectory breadcrumb trail configuration for tracked hotdogs
 trajectory_trail:

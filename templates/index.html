@@ -782,6 +782,24 @@
             border: 1px solid rgba(107, 114, 128, 0.3);
         }
 
+        .hotdog-status-pill.wrapped-pill {
+            background: rgba(16, 185, 129, 0.18);
+            color: #10b981;
+            border: 1px solid rgba(16, 185, 129, 0.5);
+            animation: wrappedPulse 2.5s ease-in-out infinite;
+        }
+
+        @keyframes wrappedPulse {
+            0%, 100% { box-shadow: 0 0 0px rgba(16, 185, 129, 0); }
+            50%       { box-shadow: 0 0 6px rgba(16, 185, 129, 0.6); }
+        }
+
+        .hotdog-entry.done {
+            border-left-color: #10b981;
+            background: rgba(16, 185, 129, 0.06);
+            opacity: 0.88;
+        }
+
         .hotdog-item-row {
             display: flex;
             justify-content: space-between;
@@ -830,6 +848,165 @@
             overflow-y: auto;
             font-family: 'Courier New', monospace;
         }
+
+        /* ══════════════════════════════════════════════════════════
+           Cart State Machine Status Panel
+        ════════════════════════════════════════════════════════════ */
+        .cart-status-panel {
+            background: linear-gradient(145deg, #111827, #1f2937);
+            border: 1px solid #374151;
+            border-radius: 8px;
+            padding: 14px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .cart-status-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .cart-title {
+            font-size: 12px;
+            font-weight: 700;
+            color: #9ca3af;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .cart-state-badge {
+            font-size: 10px;
+            font-weight: 800;
+            padding: 3px 10px;
+            border-radius: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            transition: all 0.3s ease;
+        }
+
+        .cart-state-badge.state-EMPTY {
+            background: rgba(107, 114, 128, 0.2);
+            color: #9ca3af;
+            border: 1px solid #4b5563;
+        }
+
+        .cart-state-badge.state-BUILDING {
+            background: rgba(245, 158, 11, 0.2);
+            color: #fbbf24;
+            border: 1px solid #f59e0b;
+            box-shadow: 0 0 8px rgba(245, 158, 11, 0.4);
+        }
+
+        .cart-state-badge.state-READY {
+            background: rgba(16, 185, 129, 0.2);
+            color: #10b981;
+            border: 1px solid #10b981;
+            box-shadow: 0 0 8px rgba(16, 185, 129, 0.4);
+        }
+
+        .cart-state-badge.state-RESET {
+            background: rgba(239, 68, 68, 0.2);
+            color: #ef4444;
+            border: 1px solid #ef4444;
+            box-shadow: 0 0 8px rgba(239, 68, 68, 0.4);
+        }
+
+        .cart-container-info {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 11px;
+            background: #0d1117;
+            padding: 6px 10px;
+            border-radius: 6px;
+            border: 1px solid #1f2937;
+        }
+
+        .cart-array-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            max-height: 120px;
+            overflow-y: auto;
+            padding-right: 2px;
+        }
+
+        .cart-item-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: #1f2937;
+            border: 1px solid #374151;
+            border-radius: 12px;
+            padding: 3px 8px;
+            font-size: 11px;
+            color: #f3f4f6;
+            font-weight: 600;
+        }
+
+        .cart-item-seq {
+            background: #ef4444;
+            color: #ffffff;
+            font-size: 9px;
+            font-weight: 800;
+            border-radius: 50%;
+            width: 16px;
+            height: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .cart-action-bar {
+            display: flex;
+            gap: 6px;
+            margin-top: 4px;
+        }
+
+        .cart-btn {
+            flex: 1;
+            padding: 5px 8px;
+            font-size: 10px;
+            font-weight: 700;
+            border-radius: 4px;
+            cursor: pointer;
+            border: none;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 4px;
+        }
+
+        .cart-btn-reset {
+            background: rgba(239, 68, 68, 0.15);
+            color: #f87171;
+            border: 1px solid rgba(239, 68, 68, 0.4);
+        }
+
+        .cart-btn-reset:hover {
+            background: rgba(239, 68, 68, 0.3);
+            border-color: #ef4444;
+        }
+
+        .cart-btn-ready {
+            background: rgba(16, 185, 129, 0.15);
+            color: #34d399;
+            border: 1px solid rgba(16, 185, 129, 0.4);
+        }
+
+        .cart-btn-ready:hover {
+            background: rgba(16, 185, 129, 0.3);
+            border-color: #10b981;
+        }
     </style>
 </head>
 
@@ -877,7 +1054,38 @@
     <!-- Main Container -->
     <div class="dashboard-container">
         <!-- Left Sidebar -->
-        <div class="sidebar-left">
+        <div class="sidebar-left scrollable">
+
+            <!-- ════════════════════════════════════════════════════════
+                 CART STATE MACHINE PANEL (LEFT SIDEBAR)
+            ════════════════════════════════════════════════════════ -->
+            <div class="cart-status-panel" style="margin: 12px; margin-bottom: 0;">
+                <div class="cart-status-header">
+                    <span class="cart-title">🛒 Cart State Machine</span>
+                    <div style="display:flex; align-items:center; gap:6px;">
+                        <span class="cart-hotdog-badge" id="cart-hotdog-badge" style="background:#f97316; color:#fff; font-size:10px; font-weight:800; padding:2px 8px; border-radius:10px; display:none;"></span>
+                        <span class="cart-state-badge state-EMPTY" id="cart-state-badge">EMPTY</span>
+                    </div>
+                </div>
+                
+                <div class="cart-container-info">
+                    <span style="color:#9ca3af; font-weight:600;">Container / ROI</span>
+                    <span id="cart-container-text" style="color:#38bdf8; font-weight:700;">Tray #1 (Assembly)</span>
+                </div>
+
+                <div style="display:flex; flex-direction:column; gap:4px;">
+                    <div style="display:flex; justify-content:space-between; font-size:10px; color:#9ca3af; font-weight:700; text-transform:uppercase;">
+                        <span>Array Ingredients</span>
+                        <span id="cart-total-count" style="color:#f3f4f6;">0 items</span>
+                    </div>
+                    <div class="cart-array-list" id="cart-array-list">
+                        <span style="color:#6b7280; font-size:11px; font-style:italic;">No ingredients added yet</span>
+                    </div>
+                </div>
+
+                <div id="cart-counts-summary" style="display:flex; flex-wrap:wrap; gap:4px; margin-top:2px;"></div>
+            </div>
+
             <div class="sidebar-panel kds-panel">
                 <div class="panel-title">Kitchen Display System (KDS)</div>
                 <div class="kds-tabs">
@@ -979,7 +1187,7 @@
             </div>
 
             <!-- ════════════════════════════════════════════════════════
-                 HOTDOG TRACKER PANEL (additive)
+                 HOTDOG TRACKER PANEL (RIGHT SIDEBAR)
             ════════════════════════════════════════════════════════ -->
             <div class="hotdog-tracker-panel" style="display: flex;">
                 <div class="hotdog-tracker-header">
@@ -1460,10 +1668,11 @@
             btn.textContent = _hotdogJsonVisible ? 'Hide' : 'Show';
         }
 
-        function renderHotdogTracker(hotdogLog) {
+        function renderHotdogTracker(hotdogLog, wrappingDoneIds) {
             const container = document.getElementById('hotdog-log-container');
             const badge     = document.getElementById('hotdog-count-badge');
             const jsonPre   = document.getElementById('hotdog-json-pre');
+            const doneSet   = new Set((wrappingDoneIds || []).flatMap(x => [x, String(x), Number(x)]));
 
             if (!hotdogLog || Object.keys(hotdogLog).length === 0) {
                 badge.textContent = '0 detected';
@@ -1481,10 +1690,29 @@
 
             let html = '';
             entries.forEach(rec => {
-                const isActive   = rec.active;
-                const statusCls  = isActive ? 'active-pill' : 'idle-pill';
-                const statusLabel = isActive ? 'ACTIVE' : 'IDLE';
-                const entryCls   = isActive ? 'hotdog-entry active' : 'hotdog-entry';
+                const isDone     = doneSet.has(rec.track_id) || 
+                                   doneSet.has(String(rec.track_id)) || 
+                                   doneSet.has(Number(rec.track_id)) ||
+                                   doneSet.has(rec.hotdog_id) || 
+                                   doneSet.has(String(rec.hotdog_id)) || 
+                                   doneSet.has(Number(rec.hotdog_id)) ||
+                                   doneSet.has(rec.numeric_tid);
+                const isActive   = rec.active && !isDone;
+
+                let statusCls, statusLabel, entryCls;
+                if (isDone) {
+                    statusCls   = 'wrapped-pill';
+                    statusLabel = '✓ WRAPPED';
+                    entryCls    = 'hotdog-entry done';
+                } else if (isActive) {
+                    statusCls   = 'active-pill';
+                    statusLabel = 'ACTIVE';
+                    entryCls    = 'hotdog-entry active';
+                } else {
+                    statusCls   = 'idle-pill';
+                    statusLabel = 'IDLE';
+                    entryCls    = 'hotdog-entry';
+                }
 
                 // ── Item-count summary grid ──────────────────────────────────
                 const counts = rec.item_counts || {};
@@ -1532,6 +1760,17 @@
                     }).join('');
                 }
 
+                // ── Wrapped completion banner ────────────────────────────────
+                const wrappedBanner = isDone ? `
+                    <div style="
+                        margin-top:6px;padding:5px 8px;
+                        background:rgba(16,185,129,0.12);border:1px solid rgba(16,185,129,0.35);
+                        border-radius:5px;font-size:10px;color:#10b981;font-weight:700;
+                        display:flex;align-items:center;gap:6px;
+                    ">
+                        <span style="font-size:13px;">✅</span> Order completed — hotdog fully wrapped
+                    </div>` : '';
+
                 const hid = rec.hotdog_id || rec.track_id;
                 const orderBadge = rec.order_id ? `<span style="font-size:10px;color:#6b7280;margin-left:6px;font-weight:600;">[${rec.order_id}]</span>` : '';
                 html += `
@@ -1542,6 +1781,7 @@
                         </div>
                         ${countGridHtml}
                         ${timelineHtml}
+                        ${wrappedBanner}
                     </div>`;
             });
 
@@ -1553,20 +1793,103 @@
                 summary[`order${i + 1}`] = {
                     item_counts: rec.item_counts || {},
                     item_names:  rec.item_names,
+                    wrapped:     doneSet.has(rec.track_id),
                 };
             });
             jsonPre.textContent = JSON.stringify(summary, null, 2);
         }
 
 
-        // Patch the existing WebSocket onmessage to also call renderHotdogTracker
+        /* ══════════════════════════════════════════════════════════
+           Cart State Machine Rendering & Actions
+        ════════════════════════════════════════════════════════════ */
+        function renderCartStatus(cart) {
+            if (!cart) return;
+            const badge = document.getElementById('cart-state-badge');
+            const hotdogBadge = document.getElementById('cart-hotdog-badge');
+            const containerText = document.getElementById('cart-container-text');
+            const listContainer = document.getElementById('cart-array-list');
+            const totalCountEl = document.getElementById('cart-total-count');
+            const countsContainer = document.getElementById('cart-counts-summary');
+
+            // 1. Hotdog ID & State Badge
+            if (hotdogBadge) {
+                if (cart.active_hotdog_id) {
+                    hotdogBadge.textContent = cart.active_hotdog_id;
+                    hotdogBadge.style.display = 'inline-block';
+                } else {
+                    hotdogBadge.style.display = 'none';
+                }
+            }
+            const stateVal = cart.state || 'EMPTY';
+            badge.textContent = stateVal;
+            badge.className = `cart-state-badge state-${stateVal}`;
+
+            // 2. Container Info
+            containerText.textContent = `${cart.container_id || 'Tray #1'} (Assembly)`;
+
+            // 3. Array-based ingredients
+            const items = cart.ingredients || [];
+            totalCountEl.textContent = `${items.length} item${items.length !== 1 ? 's' : ''}`;
+
+            if (items.length === 0) {
+                listContainer.innerHTML = '<span style="color:#6b7280; font-size:11px; font-style:italic;">No ingredients in cart (EMPTY)</span>';
+            } else {
+                listContainer.innerHTML = items.map((name, idx) => `
+                    <div class="cart-item-pill">
+                        <span class="cart-item-seq">${idx + 1}</span>
+                        <span>${name.replace(/_/g, ' ')}</span>
+                    </div>
+                `).join('');
+            }
+
+            // 4. Counts Summary
+            const counts = cart.counts || {};
+            const countKeys = Object.keys(counts);
+            if (countKeys.length > 0) {
+                countsContainer.innerHTML = countKeys.map(k => `
+                    <span style="background:#0d1117; border:1px solid #1f2937; padding:2px 8px; border-radius:10px; font-size:10px; color:#d1d5db;">
+                        ${k.replace(/_/g, ' ')} <strong style="color:#38bdf8;">×${counts[k]}</strong>
+                    </span>
+                `).join('');
+            } else {
+                countsContainer.innerHTML = '';
+            }
+        }
+
+        function triggerCartReset() {
+            fetch('/api/cart/reset', { method: 'POST' })
+                .then(res => res.json())
+                .then(data => {
+                    if (data.cart) renderCartStatus(data.cart);
+                })
+                .catch(err => console.error('Cart reset error:', err));
+        }
+
+        function triggerCartReady() {
+            fetch('/api/cart/event', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ event_type: 'PREP_COMPLETE' })
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.cart) renderCartStatus(data.cart);
+            })
+            .catch(err => console.error('Cart event error:', err));
+        }
+
+        // Patch the existing WebSocket onmessage to also call renderHotdogTracker and renderCartStatus
         const _origWsOnMessage = ws.onmessage;
         ws.onmessage = (event) => {
             if (_origWsOnMessage) _origWsOnMessage(event);
             try {
                 const data = JSON.parse(event.data);
                 if (data.hotdog_log !== undefined) {
-                    renderHotdogTracker(data.hotdog_log);
+                    renderHotdogTracker(data.hotdog_log, data.wrapping_done_ids || []);
+                }
+                if (data.cart !== undefined) {
+                    renderCartStatus(data.cart);
                 }
             } catch(e) {}
         };

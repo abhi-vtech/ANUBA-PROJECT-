@@ -65,6 +65,7 @@ class Action:
     timestamp: float
     duration_ms: float = 0.0
     from_zone: Optional[str] = None
+    resolved_hotdog_tid: Optional[int] = None  # YOLO track_id of the target hotdog (sauce attribution)
 
 
 @dataclass

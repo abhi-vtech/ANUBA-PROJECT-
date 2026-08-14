@@ -14,12 +14,21 @@ from fastapi.templating import Jinja2Templates
 from starlette.requests import Request
 
 from src.paths import resource
+from src.cart_state_machine import CartStateMachine, CartEvent, EventType, CartState
 
 app = FastAPI()
 templates = Jinja2Templates(directory=resource("templates"))
 
-# Set by main.py after state_machine is created
+# Global State Machines
 state_machine = None
+_cart_path = Path("config/cart_state.json")
+if _cart_path.exists():
+    try:
+        _cart_path.unlink()
+    except Exception:
+        pass
+
+cart_machine = CartStateMachine(container_id="Assembly Tray #1", persistence_path="config/cart_state.json", load_from_disk=False)
 
 
 app.add_middleware(
@@ -40,6 +49,7 @@ _latest_validation_log: list = []
 _latest_track_states: dict = {}
 _cached_zones: list = []
 _hotdog_log: dict = {}
+_wrapping_done_ids: list = []   # track_ids permanently wrapped (DONE state)
 _fps: float = 0.0
 _last_frame_time: float = 0.0
 _frame_lock = asyncio.Lock()
@@ -84,6 +94,7 @@ def update_frame_data(
     validation_log: list = None,
     track_states: dict = None,
     hotdog_log: dict = None,
+    wrapping_done_ids=None,
 ):
     global \
         _latest_frame, \
@@ -95,7 +106,8 @@ def update_frame_data(
         _latest_validation_log, \
         _fps, \
         _last_frame_time, \
-        _hotdog_log
+        _hotdog_log, \
+        _wrapping_done_ids
     _, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
     _latest_frame = buf.tobytes()
     _latest_ticket = ticket
@@ -111,6 +123,8 @@ def update_frame_data(
         _latest_track_states = track_states
     if hotdog_log is not None:
         _hotdog_log = hotdog_log
+    if wrapping_done_ids is not None:
+        _wrapping_done_ids = list(wrapping_done_ids)
 
     # Calculate FPS
     now = time.time()
@@ -149,10 +163,74 @@ def add_event(
     elif event_type == "sauce":
         desc = f"Sauce applied: <span class='zone'>{item}</span>"
     else:
-        desc = event_type
+        desc = f"{event_type}"
+        if item:
+            desc += f": <span class='zone'>{item}</span>"
+        if duration:
+            desc += f"<br>({duration:.1f}s)"
+
+    if event_type in ("pickup", "pick", "place", "sauce") and item:
+        cart_machine.process_event(
+            CartEvent(
+                event_type=EventType.INGREDIENT_ADDED,
+                ingredient_name=item,
+                roi_id=zone or "ROI_Assembly",
+                confidence=0.95,
+            )
+        )
+    elif event_type in ("container_removed", "reset", "hotdog_exited"):
+        cart_machine.process_event(
+            CartEvent(event_type=EventType.CONTAINER_REMOVED, roi_id=zone or "ROI_Assembly")
+        )
 
     _latest_events.insert(0, {"time": time_str, "description": desc})
     _latest_events = _latest_events[:20]  # Keep last 20 events
+
+
+def get_cart_data() -> dict:
+    """Returns current serializable Cart State Machine status dictionary, synchronized with hotdog tracker."""
+    active_hotdog_id = None
+    items_list = cart_machine.get_ingredient_names()
+    counts = cart_machine.get_ingredient_counts()
+
+    if _hotdog_log:
+        active_rec = None
+        # Find active/wrapping hotdog in log
+        for rec in reversed(list(_hotdog_log.values())):
+            if rec.get("active") or rec.get("status") in ("in_progress", "wrapping"):
+                active_rec = rec
+                break
+        if active_rec is None and len(_hotdog_log) > 0:
+            active_rec = list(_hotdog_log.values())[-1]
+
+        if active_rec:
+            hid = active_rec.get("hotdog_id") or active_rec.get("track_id")
+            if hid is not None:
+                active_hotdog_id = f"#{hid}"
+            rec_items = active_rec.get("item_names", [])
+            rec_counts = active_rec.get("item_counts", {})
+            if rec_items:
+                items_list = rec_items
+                counts = rec_counts
+
+    return {
+        "state": cart_machine.state.value,
+        "container_id": cart_machine.container_id or "Assembly Tray #1",
+        "active_hotdog_id": active_hotdog_id,
+        "ingredients": items_list,
+        "counts": counts,
+        "ingredient_details": [
+            {
+                "name": ing.name,
+                "confidence": ing.confidence,
+                "roi_id": ing.roi_id,
+                "added_at": ing.added_at,
+            }
+            for ing in cart_machine.ingredients
+        ],
+        "transition_history": cart_machine.transition_history[-6:],
+        "updated_at": cart_machine.updated_at,
+    }
 
 
 @app.get("/")
@@ -180,6 +258,37 @@ async def get_zones():
     return load_zones()
 
 
+@app.get("/api/cart")
+async def api_cart():
+    """Live Cart State Machine status JSON."""
+    return get_cart_data()
+
+
+@app.post("/api/cart/reset")
+async def api_cart_reset():
+    """Trigger cart reset mechanism (tied to tray removal)."""
+    cart_machine.process_event(CartEvent(event_type=EventType.CONTAINER_REMOVED, roi_id="ROI_Assembly"))
+    return {"status": "success", "cart": get_cart_data()}
+
+
+@app.post("/api/cart/event")
+async def api_cart_event(req: Request):
+    """Post an event payload into the Cart State Machine."""
+    data = await req.json()
+    evt_type_str = data.get("event_type", EventType.INGREDIENT_ADDED.value)
+    evt_type = EventType(evt_type_str) if evt_type_str in [e.value for e in EventType] else EventType.INGREDIENT_ADDED
+    
+    event = CartEvent(
+        event_type=evt_type,
+        ingredient_name=data.get("ingredient_name"),
+        roi_id=data.get("roi_id", "ROI_Assembly"),
+        container_id=data.get("container_id"),
+        confidence=float(data.get("confidence", 1.0)),
+    )
+    cart_machine.process_event(event)
+    return {"status": "success", "cart": get_cart_data()}
+
+
 @app.get("/api/stats")
 async def api_stats():
     """Current order statistics as JSON (also used as the container health probe)."""
@@ -190,6 +299,7 @@ async def api_stats():
         "orders": [asdict(o) for o in state_machine.orders] if state_machine else [],
         "history": [state_machine._order_record(o) for o in state_machine.history] if state_machine else [],
         "fps": _fps,
+        "cart": get_cart_data(),
     }
 
 
@@ -241,6 +351,8 @@ async def websocket_endpoint(websocket: WebSocket):
                     "fps": _fps,
                     "zones": _cached_zones,
                     "hotdog_log": _hotdog_log,
+                    "wrapping_done_ids": _wrapping_done_ids,
+                    "cart": get_cart_data(),
                 }
             )
             await asyncio.sleep(0.1)

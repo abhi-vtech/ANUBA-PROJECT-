@@ -6,6 +6,7 @@ secondary_model_path:        # disabled: models/weights.pt not present; run on p
 tracker_type: bytetrack
 
 
+
 pick_dwell_ms: 800   # how long (ms) a hand must be in the pick zone before we consider it a pick
 place_dwell_ms: 500
 hotdog_item_dwell_s: 0.5  # seconds an item must continuously overlap a hotdog before it is recorded as picked
@@ -29,12 +30,9 @@ frame_width: 1280
 frame_height: 720
 fps: 30
 confidence_threshold: 0.5
-# Per-class confidence override for the wrapping class.
-# The global threshold (0.5) suppresses most wrapping detections which fire
-# in the 0.10–0.50 range.  This separate threshold lets wrapping through
-# without changing sensitivity for any other class.
+hotdog_conf_threshold: 0.70
 wrapping_conf_threshold: 0.15
-wrapping_dwell_s: 0.4                  # wrapping detection overlap required for "About to Complete" (seconds)
+wrapping_dwell_s: 0.1                  # wrapping detection overlap required for "About to Complete" (seconds)
 wrapping_min_closing_frames: 30        # minimum frames "About to Complete" stays active (~1 second)
 wrapping_done_delay_s: 1.0             # delay after hotdog becomes invisible before "Order Done" (seconds)
 kds_mode: mock              # mock | dynamic

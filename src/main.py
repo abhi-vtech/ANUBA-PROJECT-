@@ -11,12 +11,12 @@ import uvicorn
 import yaml
 
 from src.capture import VideoCaptureThread
-from src.dashboard import add_event, app, update_frame_data
+from src.dashboard import add_event, app, update_frame_data, cart_machine
 from src.detector import Detector
 from src.flow import OpticalFlowAnalyzer
 from src.kds_client import DynamicKDSClient, MockKDSClient
 from src.paths import resource
-from src.schemas import HAND_CLASS, SAUCE_CLASSES, Action
+from src.schemas import HAND_CLASS, SAUCE_CLASSES, Action, Detection
 from src.state_machine import OrderStateMachine
 from src.hotdog_tracker import (
     HotdogTracker,
@@ -139,13 +139,51 @@ def _find_nearby_canonical(cx: float, cy: float, current_time: float, exclude_ke
 
 def _update_trail_buffer(detections, current_time: float):
     """Feed this frame's hotdog detections into _TRAIL_BUFFER with trail continuity."""
+    done_ids = getattr(draw_annotations, "_done_ids", set())
+    detector_id_map = getattr(draw_annotations, "_detector_id_map", {})
+
+    def _is_done(tid):
+        if not done_ids:
+            return False
+        if tid in done_ids:
+            return True
+        mono = detector_id_map.get(tid)
+        if mono is not None and mono in done_ids:
+            return True
+        ckey = _TRAIL_KEY.get(tid)
+        if ckey is not None and (ckey in done_ids or detector_id_map.get(ckey) in done_ids):
+            return True
+        return False
+
+    # Immediately purge any canonical trail keys associated with DONE hotdogs
+    stale_done_keys = set()
+    for ckey in list(_TRAIL_BUFFER.keys()):
+        if _is_done(ckey):
+            stale_done_keys.add(ckey)
+    for tid, ckey in list(_TRAIL_KEY.items()):
+        if _is_done(tid):
+            stale_done_keys.add(ckey)
+
+    for ckey in stale_done_keys:
+        _TRAIL_BUFFER.pop(ckey, None)
+        _TRAIL_LAST_SEEN.pop(ckey, None)
+        _TRAIL_LAST_POS.pop(ckey, None)
+
+    for tid in [t for t, k in list(_TRAIL_KEY.items()) if k in stale_done_keys or _is_done(t)]:
+        _TRAIL_KEY.pop(tid, None)
+
     # Collect canonical keys active THIS frame so two detections can't both inherit the same trail
     active_canonical_this_frame: set = set()
 
     for det in detections:
         if det.class_name != "hot-dog" or det.track_id is None:
             continue
-        tid = det.track_id
+        raw_tid = det.track_id
+        # Map raw detector track_id to monotonic hotdog ID if known
+        tid = detector_id_map.get(raw_tid, raw_tid)
+        if _is_done(tid) or _is_done(raw_tid):
+            continue  # Do not record trail points for completed/DONE hotdogs
+
         x1, y1, x2, y2 = det.bbox
         cx = (x1 + x2) / 2.0
         cy = (y1 + y2) / 2.0
@@ -154,7 +192,7 @@ def _update_trail_buffer(detections, current_time: float):
         if tid not in _TRAIL_KEY:
             # New track_id: try to inherit a nearby trail that was recently lost
             inherited = _find_nearby_canonical(cx, cy, current_time, active_canonical_this_frame)
-            if inherited is not None:
+            if inherited is not None and not _is_done(inherited):
                 # Continue that trail under the new track_id
                 _TRAIL_KEY[tid] = inherited
             else:
@@ -163,6 +201,9 @@ def _update_trail_buffer(detections, current_time: float):
                 _TRAIL_BUFFER[tid] = deque(maxlen=_TRAIL_MAXLEN)
 
         ckey = _TRAIL_KEY[tid]
+        if _is_done(ckey):
+            continue
+
         active_canonical_this_frame.add(ckey)
 
         # Ensure buffer exists (edge case: inherited key might not exist yet)
@@ -183,10 +224,10 @@ def _update_trail_buffer(detections, current_time: float):
         _TRAIL_LAST_SEEN[ckey] = current_time
         _TRAIL_LAST_POS[ckey] = (cx, cy)
 
-    # Purge canonical trails gone > _TRAIL_FADE_S seconds (clean up memory)
+    # Purge canonical trails gone > _TRAIL_FADE_S seconds or marked DONE
     stale_keys = [
         ckey for ckey, t in _TRAIL_LAST_SEEN.items()
-        if (current_time - t) > _TRAIL_FADE_S
+        if (current_time - t) > _TRAIL_FADE_S or _is_done(ckey)
     ]
     for ckey in stale_keys:
         _TRAIL_BUFFER.pop(ckey, None)
@@ -194,7 +235,7 @@ def _update_trail_buffer(detections, current_time: float):
         _TRAIL_LAST_POS.pop(ckey, None)
     # Clean up track_id -> key mappings for stale canonical keys
     stale_set = set(stale_keys)
-    for tid in [t for t, k in _TRAIL_KEY.items() if k in stale_set]:
+    for tid in [t for t, k in list(_TRAIL_KEY.items()) if k in stale_set or _is_done(t)]:
         _TRAIL_KEY.pop(tid, None)
 
 
@@ -229,9 +270,14 @@ def draw_annotations(frame, detections, zones, current_order):
 
     # ── Draw standalone track trails (pure YOLO track_id w/ continuity, no Re-ID) ──
     current_time = getattr(draw_annotations, "_current_video_time", _time_module.time())
+    done_ids = getattr(draw_annotations, "_done_ids", set())
+    detector_id_map = getattr(draw_annotations, "_detector_id_map", {})
+
     _update_trail_buffer(detections, current_time)
 
     for ckey, buf in list(_TRAIL_BUFFER.items()):
+        if done_ids and (ckey in done_ids or detector_id_map.get(ckey) in done_ids):
+            continue
         pts = list(buf)
         if len(pts) < 2:
             continue
@@ -273,41 +319,71 @@ def draw_annotations(frame, detections, zones, current_order):
         if det.class_name == "hot-dog":
             # Match record in hotdog_log to find monotonic hotdog_id
             matched_rec = None
-            if hasattr(det, 'track_id') and det.track_id in hotdog_log:
-                matched_rec = hotdog_log[det.track_id]
-            else:
-                # Find by closest bbox overlay
-                best_area = 0
+            raw_tid = getattr(det, "track_id", None)
+
+            # 1. Primary: Look up monotonic ID via detector_id_map
+            if raw_tid is not None and raw_tid in detector_id_map:
+                mono_id = detector_id_map[raw_tid]
+                if mono_id in hotdog_log:
+                    matched_rec = hotdog_log[mono_id]
+
+            # 2. Secondary: Match by spatial proximity & bounding box IoU with active records in hotdog_log
+            if matched_rec is None:
+                det_cx = (x1 + x2) / 2.0
+                det_cy = (y1 + y2) / 2.0
+                best_score = float("inf")
                 for rec in hotdog_log.values():
+                    if rec.get("retired") or rec.get("active") is False:
+                        continue
                     rx1, ry1, rx2, ry2 = rec.get("bbox", (0, 0, 0, 0))
+                    rcx = (rx1 + rx2) / 2.0
+                    rcy = (ry1 + ry2) / 2.0
+                    dist = ((det_cx - rcx) ** 2 + (det_cy - rcy) ** 2) ** 0.5
+                    # Compute IoU
                     inter = max(0, min(x2, rx2) - max(x1, rx1)) * max(0, min(y2, ry2) - max(y1, ry1))
-                    if inter > best_area:
-                        best_area = inter
-                        matched_rec = rec
+                    union = (x2 - x1) * (y2 - y1) + (rx2 - rx1) * (ry2 - ry1) - inter
+                    iou = inter / union if union > 0 else 0.0
 
-            hid = matched_rec.get("hotdog_id") if matched_rec else getattr(det, "track_id", "?")
-            label_text = f"hotdog_{hid}"
-            if matched_rec and matched_rec.get("order_id"):
-                label_text += f" [{matched_rec['order_id']}]"
+                    if iou >= 0.15 or dist <= 200.0:
+                        score = (1.0 - iou) * 100.0 + dist
+                        if score < best_score:
+                            best_score = score
+                            matched_rec = rec
 
-            # Draw distinct hot-dog bounding box & label header
+            # 3. Tertiary fallback: if raw_tid in hotdog_log and not remapped to something else
+            if matched_rec is None and raw_tid is not None and raw_tid in hotdog_log:
+                if not any(mono == raw_tid for mono in detector_id_map.values() if mono != raw_tid):
+                    matched_rec = hotdog_log[raw_tid]
+
+            # Only show hotdog ID just like #1 (not name or text)
+            if matched_rec:
+                hid = matched_rec.get("hotdog_id")
+            elif raw_tid is not None and raw_tid in detector_id_map:
+                hid = str(detector_id_map[raw_tid])
+            elif raw_tid not in (-1, None, "?"):
+                hid = str(raw_tid)
+            else:
+                hid = "1"
+            label_text = f"#{hid}"
+
+            # Draw distinct hot-dog bounding box & compact ID header (#1)
             color = (0, 140, 255)  # Vibrant orange (BGR)
             cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
 
             font = cv2.FONT_HERSHEY_SIMPLEX
-            font_scale = 0.55
+            font_scale = 0.60
             thickness = 2
             (text_w, text_h), _ = cv2.getTextSize(label_text, font, font_scale, thickness)
 
-            lbl_y1 = max(0, y1 - text_h - 10)
-            lbl_y2 = max(text_h + 10, y1)
-            cv2.rectangle(frame, (x1, lbl_y1), (x1 + text_w + 12, lbl_y2), (0, 0, 0), -1)
-            cv2.rectangle(frame, (x1, lbl_y1), (x1 + text_w + 12, lbl_y2), color, 2)
+            lbl_y1 = max(0, y1 - text_h - 8)
+            lbl_y2 = y1
+            cv2.rectangle(frame, (x1, lbl_y1), (x1 + text_w + 10, lbl_y2), (0, 100, 220), -1)
+            cv2.rectangle(frame, (x1, lbl_y1), (x1 + text_w + 10, lbl_y2), color, 1)
 
             cv2.putText(
                 frame,
                 label_text,
-                (x1 + 6, lbl_y2 - 5),
+                (x1 + 5, lbl_y2 - 3),
                 font,
                 font_scale,
                 (255, 255, 255),
@@ -339,7 +415,97 @@ def draw_annotations(frame, detections, zones, current_order):
         cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
         cv2.circle(frame, (cx, cy), 5, color, -1)
 
+    # ── Bottom status bar for added ingredients ────────────────────────────
+    # User requirement: remove overlays like chilli 1x on screen, make them in down like id one is added
+    active_hotdog_items = []
+    if hotdog_log:
+        for tid, rec in hotdog_log.items():
+            if rec.get("retired") and rec.get("status") == "done":
+                continue
+            hid = rec.get("hotdog_id", str(tid))
+            items = rec.get("item_names", [])
+            if items:
+                items_str = ", ".join(name.replace("_", " ") for name in items)
+                active_hotdog_items.append(f"ID #{hid}: {items_str} added")
+
+    if active_hotdog_items:
+        bar_text = "   |   ".join(active_hotdog_items)
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        font_scale = 0.52
+        thickness = 1
+        (tw, th), _ = cv2.getTextSize(bar_text, font, font_scale, thickness)
+
+        # Draw sleek semi-transparent dark bar at the bottom
+        overlay = frame.copy()
+        bar_h = 36
+        cv2.rectangle(overlay, (0, h - bar_h), (w, h), (18, 18, 18), -1)
+        cv2.addWeighted(overlay, 0.75, frame, 0.25, 0, frame)
+
+        # Green indicator dot
+        cv2.circle(frame, (20, h - bar_h // 2), 5, (16, 185, 129), -1)
+        cv2.putText(
+            frame,
+            bar_text,
+            (36, h - bar_h // 2 + 5),
+            font,
+            font_scale,
+            (240, 240, 240),
+            thickness,
+            cv2.LINE_AA,
+        )
+
     return frame
+
+
+# ── Exit-line tripwire module (additive — do not remove) ─────────────────────
+from src.exit_detector import ExitDetector  # noqa: E402
+
+_main_exit_detector = ExitDetector(resource("config/exit_line.json"))
+
+def _draw_exit_line_overlays(
+    frame: np.ndarray,
+    hand_detections: list,
+    wrapping_sm,
+    hotdog_tracker,
+) -> np.ndarray:
+    """
+    Draw exit tripwire line and check hand crossing for outgoing wrapped hotdogs.
+    Called in main loop so exit line appears in all video runs and live dashboard.
+    """
+    h, w = frame.shape[:2]
+    cfg_path = Path(resource("config/exit_line.json"))
+    if cfg_path.exists():
+        try:
+            mtime = cfg_path.stat().st_mtime
+            if getattr(_draw_exit_line_overlays, "_last_mtime", 0) != mtime:
+                _draw_exit_line_overlays._last_mtime = mtime
+                _main_exit_detector.load_config(str(cfg_path))
+        except Exception:
+            pass
+
+    hand_bboxes = [d.bbox for d in hand_detections]
+    wrapped_ids = list(wrapping_sm.done_ids)
+    if hasattr(wrapping_sm, "_states"):
+        for h_id, wrap_state in wrapping_sm._states.items():
+            if getattr(wrap_state, "state", None) in ("closing", "done") and h_id not in wrapped_ids:
+                wrapped_ids.append(h_id)
+
+    if not wrapped_ids:
+        h_log = hotdog_tracker.get_hotdog_log()
+        wrapped_ids = [rec.get("hotdog_id", tid) for tid, rec in h_log.items()]
+
+    evt = _main_exit_detector.check_crossing(
+        hand_bboxes=hand_bboxes,
+        wrapped_hotdog_ids=wrapped_ids,
+        frame_width=w,
+        frame_height=h,
+    )
+
+    if evt:
+        logger.info(f"🔥 [EXIT LINE] Outgoing Hotdog Detected! Exited: {evt.exited_hotdog_ids}")
+        add_event("container_removed", zone="Exit_Line_ROI", item="hotdog_exited")
+
+    return _main_exit_detector.draw_overlay(frame)
 
 
 # ── Wrapping-state on-screen overlays (additive — do not remove) ───────────────
@@ -504,6 +670,10 @@ def main():
                 "WRAPPING_CONF_THRESHOLD",
                 config.get("wrapping_conf_threshold", 0.15),
             )),
+            "hot-dog": float(_env(
+                "HOTDOG_CONF_THRESHOLD",
+                config.get("hotdog_conf_threshold", 0.10),
+            )),
         },
     )
     zones = ZoneManager(resource("config/zones.json"))
@@ -548,6 +718,44 @@ def main():
     orphan_timeout_s = cfg_track_buffer / float(fps if fps else 30.0)
 
     # ── Hotdog tracker (additive, does not modify core pipeline) ──────────
+
+    # Build wrap-zone polygon in PIXEL space for HotdogTracker.
+    # zones.json stores normalised [0-1] coordinates; HotdogTracker uses pixel
+    # bboxes, so we must scale by (frame_w, frame_h).
+    # _point_in_wrap_zone() was always returning False before this because
+    # wrap_zone_poly was never passed — meaning the 20 s coast buffer, 450 px
+    # spatial lock, and stall watchdog were completely inactive.
+    _wrap_zone_poly_px = None
+    _assembly_zones = zones.get_zones_by_type("assembly")
+    if _assembly_zones:
+        _az = _assembly_zones[0]  # use first (only) assembly zone
+        _wrap_zone_poly_px = [
+            (px * frame_w, py * frame_h)
+            for px, py in _az.polygon
+        ]
+        logger.info(
+            "[INIT] Wrap-zone polygon wired: %d vertices  zone=%r  "
+            "frame=%dx%d",
+            len(_wrap_zone_poly_px), _az.name, frame_w, frame_h,
+        )
+    else:
+        logger.warning(
+            "[INIT] No assembly zone found in zones.json — "
+            "wrap-zone overrides (20 s coast, 450 px lock) will NOT activate."
+        )
+
+    # Read wrap_station overrides from tracker.yaml
+    _wrap_cfg = tracker_config.get("wrap_station", {})
+    _wrap_spatial_lock  = float(_wrap_cfg.get("spatial_lock_radius",   450.0))
+    _wrap_orphan_s      = float(_wrap_cfg.get("occlusion_buffer_s",     20.0))
+    _wrap_stall_s       = float(_wrap_cfg.get("stall_watchdog_window_s", 20.0))
+    _wrap_reid_enabled  = bool(_wrap_cfg.get("hand_transit_reid_enabled", _wrap_cfg.get("appearance_reid_enabled", True)))
+    _wrap_reid_gap_s    = float(_wrap_cfg.get("hand_transit_max_gap_s", 60.0))
+    _wrap_hand_speed    = float(_wrap_cfg.get("max_hand_speed_px_per_frame", 55.0))
+    _wrap_hand_timeout  = int(_wrap_cfg.get("hand_lost_timeout_frames", 180))
+    _wrap_hand_window   = int(_wrap_cfg.get("hand_assoc_frame_window", 5))
+    _wrap_hand_disp     = float(_wrap_cfg.get("base_hand_displacement_px", 300.0))
+
     hotdog_tracker = HotdogTracker(
         proximity_pad=int(_env("HOTDOG_PROXIMITY_PAD", 30)),
         orphan_timeout_s=float(_env("HOTDOG_ORPHAN_TIMEOUT", orphan_timeout_s)),
@@ -569,6 +777,17 @@ def main():
         trail_smooth_alpha=float(_env("TRAIL_SMOOTH_ALPHA", trail_cfg.get("smooth_alpha", 0.35))),
         trail_anchor=_env("TRAIL_ANCHOR", trail_cfg.get("anchor", "bottom_center")),
         retain_lost_trails=str(_env("RETAIN_LOST_TRAILS", trail_cfg.get("retain_lost_trails", True))).lower() in ("true", "1", "yes"),
+        # ── Wrap-zone ROI overrides ──────────────────────────────────────────
+        wrap_zone_poly=_wrap_zone_poly_px,           # pixel-space polygon
+        wrap_spatial_lock_radius=_wrap_spatial_lock, # 450 px inside wrap zone
+        wrap_orphan_timeout_s=_wrap_orphan_s,        # 20 s coast in wrap zone
+        wrap_stall_watchdog_s=_wrap_stall_s,         # 20 s merge window
+        hand_transit_reid_enabled=_wrap_reid_enabled,
+        hand_transit_max_gap_s=_wrap_reid_gap_s,
+        max_hand_speed_px_per_frame=_wrap_hand_speed,
+        hand_lost_timeout_frames=_wrap_hand_timeout,
+        hand_assoc_frame_window=_wrap_hand_window,
+        base_hand_displacement_px=_wrap_hand_disp,
     )
 
     if kds_mode == "dynamic":
@@ -589,6 +808,9 @@ def main():
         history_path=config.get("kds_history"),
     )
     state_machine.set_kds_client(kds)
+
+    # ── Ensure clean, fresh startup (do not load old values) ────────────────
+    cart_machine.reset("System start clean session")
 
     # Run ONLY the video specified in config/model.yaml (or VIDEO_SOURCE env var)
     video_playlist = [source]
@@ -628,6 +850,7 @@ def main():
         wrapping_dwell_s=float(_env("WRAPPING_DWELL_S", config.get("wrapping_dwell_s", 0.4))),
         min_closing_frames=int(_env("WRAPPING_MIN_CLOSING_FRAMES", config.get("wrapping_min_closing_frames", 30))),
         done_delay_s=float(_env("WRAPPING_DONE_DELAY_S", config.get("wrapping_done_delay_s", 1.0))),
+        min_coverage_ratio=float(_env("WRAPPING_MIN_COVERAGE_RATIO", config.get("wrapping_min_coverage_ratio", 0.25))),
     )
     SAUCE_MIN_FRAMES = 1     # 1 frame accumulation for responsive detection
 
@@ -872,23 +1095,47 @@ def main():
 
                     resolved_hotdog_tids: list = []
                     if nearest_sauce_hand is not None:
-                        # Hand found — route sauce to the hotdog nearest that hand
-                        shx1, shy1, shx2, shy2 = _shrink_hand_bbox(nearest_sauce_hand.bbox)
-                        hand_pt_x = (shx1 + shx2) / 2.0
-                        hand_pt_y = float(shy2)
-                        best_sd = float('inf')
-                        best_s_tid = None
-                        for d in detections:
-                            if d.class_name != "hot-dog":
-                                continue
-                            rcx = (d.bbox[0] + d.bbox[2]) / 2.0
-                            rcy = (d.bbox[1] + d.bbox[3]) / 2.0
-                            dist = ((hand_pt_x - rcx) ** 2 + (hand_pt_y - rcy) ** 2) ** 0.5
-                            if dist < 350 and dist < best_sd:
-                                best_sd = dist
-                                best_s_tid = d.track_id
-                        if best_s_tid is not None:
-                            resolved_hotdog_tids = [best_s_tid]
+                        # Hand confirmed near bottle — route sauce to ALL hotdogs
+                        # sitting side-by-side or held in hand (bottle bbox overlap
+                        # or centroid within 250px).
+                        # Includes active tracker records so hotdog 2 is resolved
+                        # even when occluded by the worker's hand holding it.
+                        bottle_cx = (det.bbox[0] + det.bbox[2]) / 2.0
+                        bottle_cy = (det.bbox[1] + det.bbox[3]) / 2.0
+                        
+                        PROXIMITY_THRESHOLD_PX = 250.0
+                        nearby_hotdog_tids = []
+                        closest_tid = None
+                        closest_dist = float('inf')
+
+                        # Combine raw YOLO detections + active tracker records (for hand occlusion)
+                        hotdog_targets = []
+                        seen_tids = set()
+                        for hd in detections:
+                            if hd.class_name == "hot-dog":
+                                hotdog_targets.append((hd.track_id, hd.bbox))
+                                seen_tids.add(hd.track_id)
+                        for tid, rec in hotdog_tracker._records.items():
+                            if not rec.retired and tid not in seen_tids:
+                                hotdog_targets.append((tid, rec.bbox))
+                        
+                        for htid, hbbox in hotdog_targets:
+                            rcx = (hbbox[0] + hbbox[2]) / 2.0
+                            rcy = (hbbox[1] + hbbox[3]) / 2.0
+                            dist = ((bottle_cx - rcx) ** 2 + (bottle_cy - rcy) ** 2) ** 0.5
+                            overlaps = _boxes_overlap(det.bbox, hbbox)
+                            
+                            if dist < closest_dist:
+                                closest_dist = dist
+                                closest_tid = htid
+                                
+                            if overlaps or dist <= PROXIMITY_THRESHOLD_PX:
+                                nearby_hotdog_tids.append(htid)
+                                
+                        if nearby_hotdog_tids:
+                            resolved_hotdog_tids = nearby_hotdog_tids
+                        elif closest_tid is not None and closest_dist <= 400.0:
+                            resolved_hotdog_tids = [closest_tid]
 
                     if not resolved_hotdog_tids:
                         # No hand visible — fall back to old bbox-overlap logic
@@ -899,6 +1146,7 @@ def main():
                         ]
                         fire_count = max(1, len(hotdog_bboxes_under_bottle))
                         resolved_hotdog_tids = [None] * fire_count
+
 
                     for resolved_tid in resolved_hotdog_tids:
                         # Per-hotdog cooldown: each (sauce_class, hotdog_tid) pair
@@ -914,6 +1162,7 @@ def main():
                                     zone_name=det.class_name,
                                     action_type="sauce",
                                     timestamp=current_time,
+                                    resolved_hotdog_tid=resolved_tid,
                                 )
                             )
                             _sauce_applied[sauce_key] = True
@@ -931,6 +1180,35 @@ def main():
             # the nearest active hotdog ID and commit the item/sauce directly.
             for action in actions:
                 if action.action_type in ("pick", "place", "pickup", "sauce"):
+                    # For sauce with a pre-resolved hotdog tid, resolve monotonic id
+                    # and commit directly without spatial re-search.
+                    if (
+                        action.action_type == "sauce"
+                        and action.resolved_hotdog_tid is not None
+                    ):
+                        raw_tid = action.resolved_hotdog_tid
+                        # If already a valid monotonic tid in _records, use directly
+                        if raw_tid in hotdog_tracker._records or raw_tid in hotdog_tracker._retired_records:
+                            mono_tid = raw_tid
+                        else:
+                            mono_tid = hotdog_tracker._detector_id_map.get(raw_tid, raw_tid)
+
+                        committed_tid = hotdog_tracker.force_commit_item(
+                            hand_working_pt=(0.0, 0.0),  # unused when target_tid set
+                            item_class=action.zone_name,
+                            now=current_time,
+                            max_radius=300,
+                            is_sauce=True,
+                            target_tid=mono_tid,
+                        )
+                        if committed_tid is not None:
+                            logger.debug(
+                                "[sauce→hotdog] direct '%s' → hotdog #%d (resolved_tid=%s, mono_tid=%s)",
+                                action.zone_name, committed_tid,
+                                action.resolved_hotdog_tid, mono_tid,
+                            )
+                        continue  # skip spatial fallback below
+
                     firing_hand = next(
                         (h for h in hand_detections if h.track_id == action.track_id),
                         hand_detections[0] if hand_detections else None,
@@ -989,6 +1267,13 @@ def main():
                     )
 
 
+            # Translate wrapping done_ids (YOLO/monotonic track_ids) → monotonic hotdog IDs
+            _wrapping_done_mono = set(wrapping_sm.done_ids) | set(getattr(hotdog_tracker, "_permanent_done_ids", set()))
+            for _yolo_tid in list(wrapping_sm.done_ids):
+                _mono = hotdog_tracker._detector_id_map.get(_yolo_tid)
+                if _mono is not None:
+                    _wrapping_done_mono.add(_mono)
+
             # ── Hotdog tracker update (ByteTrack + Monotonic IDs + POS Fusion) ──
             active_ticket_id = state_machine.current_ticket.ticket_id if state_machine.current_ticket else None
             hotdog_tracker.update(
@@ -996,6 +1281,7 @@ def main():
                 current_time=current_time,
                 frame=frame,
                 active_ticket_id=active_ticket_id,
+                done_ids=_wrapping_done_mono,
             )
 
             is_ending_soon = False
@@ -1009,16 +1295,39 @@ def main():
                         is_ending_soon = True
 
             # ── Wrapping-state update (additive — do not remove) ───────────────
+            _hotdog_dets_mono = []
+            for d in detections:
+                if d.class_name == "hot-dog":
+                    _mono = hotdog_tracker._detector_id_map.get(d.track_id, d.track_id)
+                    _hotdog_dets_mono.append(
+                        Detection(
+                            track_id=_mono,
+                            bbox=d.bbox,
+                            class_name=d.class_name,
+                            confidence=d.confidence,
+                        )
+                    )
+
             _wrapping_events = wrapping_sm.update(
                 frame_idx=frame_count,
                 current_time=current_time,
-                hotdog_detections=[d for d in detections if d.class_name == "hot-dog"],
+                hotdog_detections=_hotdog_dets_mono,
                 wrapping_detections=[d for d in detections if d.class_name == "wrapping"],
                 video_ending_soon=is_ending_soon,
             )
             # Print state transitions to terminal immediately for visibility
             for _ev in _wrapping_events:
-                if _ev["event"] == "closing":
+                _ev_type = _ev.get("event")
+                _yolo_tid = _ev.get("hotdog_tid")
+                _mono = hotdog_tracker._detector_id_map.get(_yolo_tid, _yolo_tid)
+                hotdog_tracker.record_wrapping_event(
+                    event_type=_ev_type,
+                    track_id=_mono,
+                    timestamp=_ev.get("timestamp", current_time),
+                    frame_idx=_ev.get("frame", frame_count),
+                    closing_time=_ev.get("closing_time"),
+                )
+                if _ev_type == "closing":
                     if state_machine.current_order:
                         state_machine.current_order.ending_soon = True
                     add_event("hover", zone="wrapping", item="about_to_complete", duration=0.4)
@@ -1030,9 +1339,11 @@ def main():
                         f"{'='*54}",
                         flush=True,
                     )
-                elif _ev["event"] == "done":
+                elif _ev_type == "done":
                     if state_machine.current_order:
                         state_machine.current_order.ending_soon = False
+                    if _mono is not None:
+                        hotdog_tracker._permanent_done_ids.add(_mono)
                     add_event("place", zone="assembly", item="wrapped_hotdog", duration=1.0)
                     print(
                         f"\n{'='*54}\n"
@@ -1069,8 +1380,22 @@ def main():
                     detection_counts.get(det.class_name, 0) + 1
                 )
 
+            # ── Automated Cart State Machine Transitions ───────────────────────
+            from src.cart_state_machine import CartEvent, EventType
+
+            hotdog_dets = [d for d in detections if d.class_name == "hot-dog"]
+            if hotdog_dets:
+                cart_machine.process_event(CartEvent(event_type=EventType.HOTDOG_DETECTED))
+                for hd in hotdog_dets:
+                    z = zones.get_zone_for_bbox(hd.bbox, w, h, is_hand=False)
+                    if z and z.zone_type == "assembly":
+                        cart_machine.process_event(CartEvent(event_type=EventType.ENTERED_ASSEMBLY))
+                        break
+
             draw_annotations._hotdog_log_ref = hotdog_tracker.get_hotdog_log()
             draw_annotations._current_video_time = current_time
+            draw_annotations._done_ids = set(wrapping_sm.done_ids) | getattr(hotdog_tracker, "_permanent_done_ids", set())
+            draw_annotations._detector_id_map = dict(getattr(hotdog_tracker, "_detector_id_map", {}))
             annotated = draw_annotations(
                 frame.copy(), visible_detections, zones, state_machine.get_current_order()
             )
@@ -1080,6 +1405,18 @@ def main():
             _draw_wrapping_overlays(
                 annotated, frame_count, detections, wrapping_sm
             )
+            # ── Exit-line tripwire rendering & crossing detection ─────────────
+            annotated = _draw_exit_line_overlays(
+                annotated, hand_detections, wrapping_sm, hotdog_tracker
+            )
+            # Translate wrapping done_ids (YOLO/monotonic track_ids) → monotonic hotdog IDs
+            # so they match the IDs used in hotdog_tracker.get_hotdog_log().
+            _wrapping_done_mono = set(wrapping_sm.done_ids) | set(getattr(hotdog_tracker, "_permanent_done_ids", set()))
+            for _yolo_tid in list(wrapping_sm.done_ids):
+                _mono = hotdog_tracker._detector_id_map.get(_yolo_tid)
+                if _mono is not None:
+                    _wrapping_done_mono.add(_mono)
+
             update_frame_data(
                 annotated,
                 state_machine.current_ticket,
@@ -1089,6 +1426,7 @@ def main():
                 validation_log=state_machine.get_validation_log(),
                 track_states=temporal.get_track_states(),
                 hotdog_log=hotdog_tracker.get_hotdog_log(),
+                wrapping_done_ids=_wrapping_done_mono,
             )
 
             loop_ms = (time.perf_counter() - loop_start) * 1000.0
@@ -1123,16 +1461,28 @@ def main():
     except KeyboardInterrupt:
         pass
     finally:
-        # ── Emit final hotdog summary as a JSON event (additive) ──────────
+        # ── Sync wrapping states before emitting final summary ────────────
         try:
+            hotdog_tracker.sync_wrapping_states(wrapping_sm)
+        except Exception:
+            pass
+
+        # ── Emit final hotdog summary as a JSON event and write to disk ───
+        try:
+            summary_payload = hotdog_tracker.get_summary(wrapping_sm=wrapping_sm)
             metrics_logger.info(
                 json.dumps({
                     "event": "hotdog_summary",
-                    "hotdog_log": hotdog_tracker.get_summary(),
+                    "hotdog_log": summary_payload,
                 })
             )
-        except Exception:
-            pass
+            out_file = Path(resource("output/hotdog_summary.json"))
+            out_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(out_file, "w") as f:
+                json.dump(summary_payload, f, indent=2)
+        except Exception as e:
+            logger.debug("Failed to write final hotdog summary: %s", e)
+
         state_machine.save_history()
         capture.release()
 

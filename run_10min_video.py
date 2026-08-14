@@ -148,56 +148,158 @@ def main():
                 print(f"  {line_s}", flush=True)
 
     except KeyboardInterrupt:
-        print("\n[INFO] Interrupted by user — fetching hotdog log snapshot...")
+        print("\n[INFO] Interrupted by user — collecting hotdog log snapshot...")
         process.terminate()
 
     process.wait()
 
-    # ── Fetch hotdog log (fallback: try API if event wasn't captured) ──────
+    # ── Fallback: read directly from generated output file or API ───────────
+    if not hotdog_log_snapshot and os.path.exists(SUMMARY_PATH):
+        try:
+            with open(SUMMARY_PATH, "r") as f:
+                hotdog_log_snapshot = json.load(f)
+        except Exception:
+            pass
+
     if not hotdog_log_snapshot:
         try:
             import urllib.request
             with urllib.request.urlopen("http://localhost:8000/api/hotdog_log", timeout=5) as resp:
                 hotdog_api = json.loads(resp.read().decode())
                 raw = hotdog_api.get("hotdogs", {})
-                for i, (hid, rec) in enumerate(raw.items(), start=1):
-                    hotdog_log_snapshot[f"order{i}"] = {
-                        "hotdog_id": rec.get("hotdog_id", hid),
-                        "track_id": rec.get("track_id"),
-                        "item_names": rec.get("item_names", []),
-                        "items_added": rec.get("items_added", []),
-                        "completed": len(rec.get("items_added", [])) > 0,
-                    }
+                hotdog_log_snapshot = {
+                    "total_hotdogs": len(raw),
+                    "hotdogs": list(raw.values()),
+                    "orders": {f"order{i}": rec for i, rec in enumerate(raw.values(), start=1)},
+                }
         except Exception as e:
             print(f"[WARN] Could not fetch hotdog log from API ({e}).")
 
-    # ── Build order-style summary ───────────────────────────────────────────
-    orders_summary: dict = {}
-    item_timeline: list = []
-    for key, rec in hotdog_log_snapshot.items():
-        if isinstance(rec, dict) and "hotdog_id" in rec:
-            orders_summary[key] = rec
-            items_added = rec.get("items_added", [])
-            for it in items_added:
-                if "hotdog_id" not in it:
-                    it["hotdog_id"] = rec["hotdog_id"]
-            item_timeline.extend(items_added)
-        else:
-            orders_summary[key] = {"hotdog_id": key, "item_names": []}
+    # ── Extract or Build Structured Hotdogs List ────────────────────────────
+    def _format_time_str(ts):
+        if ts is None:
+            return None
+        if ts < 86400:
+            m, s = divmod(int(ts), 60)
+            h, m = divmod(m, 60)
+            return f"{h:02d}:{m:02d}:{s:02d}"
+        return time.strftime("%H:%M:%S", time.localtime(ts))
 
-    item_timeline.sort(key=lambda x: x.get("timestamp", 0))
+    hotdogs_list = []
+    if "hotdogs" in hotdog_log_snapshot and isinstance(hotdog_log_snapshot["hotdogs"], list):
+        hotdogs_list = hotdog_log_snapshot["hotdogs"]
+    elif "orders" in hotdog_log_snapshot:
+        for key, rec in hotdog_log_snapshot.get("orders", {}).items():
+            start_ts = rec.get("start_time_s", rec.get("first_seen"))
+            end_ts = rec.get("end_time_s", rec.get("wrapping_done_time", rec.get("last_seen")))
+            dur = rec.get("duration_s", (round(end_ts - start_ts, 2) if start_ts and end_ts else 0.0))
+            undergone_wrap = rec.get("undergone_wrapping", rec.get("completed", False))
+
+            items_list = []
+            for it in rec.get("items_added", []):
+                ts = it.get("timestamp_s", it.get("timestamp", it.get("video_timestamp_s", 0.0)))
+                items_list.append({
+                    "hotdog_id": rec.get("hotdog_id", key),
+                    "item": it.get("item"),
+                    "count": it.get("count", 1),
+                    "timestamp_s": round(ts, 2),
+                    "time_str": it.get("time_str", _format_time_str(ts)),
+                    "video_timestamp_s": round(ts, 2),
+                })
+
+            hotdogs_list.append({
+                "hotdog_id": str(rec.get("hotdog_id", key)),
+                "track_id": rec.get("track_id"),
+                "order_id": rec.get("order_id"),
+                "status": rec.get("status", "done" if undergone_wrap else "in_progress"),
+                "undergone_wrapping": undergone_wrap,
+                "start_time": {
+                    "timestamp_s": round(start_ts, 2) if start_ts is not None else None,
+                    "time_str": _format_time_str(start_ts),
+                },
+                "end_time": {
+                    "timestamp_s": round(end_ts, 2) if end_ts is not None else None,
+                    "time_str": _format_time_str(end_ts),
+                },
+                "wrapping": {
+                    "undergone_wrapping": undergone_wrap,
+                    "started_at_s": rec.get("wrapping_dwell_start"),
+                    "started_at_str": _format_time_str(rec.get("wrapping_dwell_start")),
+                    "closing_at_s": rec.get("wrapping_closing_time"),
+                    "closing_at_str": _format_time_str(rec.get("wrapping_closing_time")),
+                    "done_at_s": rec.get("wrapping_done_time"),
+                    "done_at_str": _format_time_str(rec.get("wrapping_done_time")),
+                },
+                "duration_s": dur,
+                "items_added": items_list,
+                "item_names": rec.get("item_names", [it["item"] for it in items_list]),
+                "item_counts": rec.get("item_counts", {}),
+                "completed": rec.get("completed", undergone_wrap),
+            })
+
+    hotdogs_list.sort(
+        key=lambda h: (
+            h.get("start_time", {}).get("timestamp_s") or 0.0,
+            h.get("track_id") or 0,
+        )
+    )
+
+    item_timeline = []
+    for h in hotdogs_list:
+        item_timeline.extend(h.get("items_added", []))
+    item_timeline.sort(key=lambda x: x.get("timestamp_s", x.get("timestamp", 0.0)))
+
+    completed_hotdogs_count = sum(
+        1 for h in hotdogs_list if h.get("status") == "done" or h.get("undergone_wrapping")
+    )
+
+    orders_summary = {f"order{i}": h for i, h in enumerate(hotdogs_list, start=1)}
 
     full_summary = {
         "video": os.path.basename(VIDEO_PATH),
         "run_duration_s": round(time.time() - start_time, 1),
-        "total_hotdogs": len(orders_summary),
+        "total_hotdogs": len(hotdogs_list),
+        "completed_hotdogs": completed_hotdogs_count,
+        "in_progress_hotdogs": len(hotdogs_list) - completed_hotdogs_count,
         "total_orders_processed": final_stats.get("total_orders", 0),
         "passed_orders": final_stats.get("passed_orders", 0),
         "failed_orders": final_stats.get("failed_orders", 0),
         "accuracy_pct": final_stats.get("accuracy_pct", 0.0),
         "detections_by_class": total_detections_sum,
+        "hotdogs": hotdogs_list,
         "item_timeline": item_timeline,
         "orders": orders_summary,
+        "regression_metrics": hotdog_log_snapshot.get("regression_metrics", {}),
+    }
+
+    timeline_summary = {
+        "video": os.path.basename(VIDEO_PATH),
+        "total_hotdogs": len(hotdogs_list),
+        "completed_hotdogs": completed_hotdogs_count,
+        "hotdogs": [
+            {
+                "hotdog_id": h.get("hotdog_id"),
+                "status": h.get("status"),
+                "undergone_wrapping": h.get("undergone_wrapping"),
+                "start_time": h.get("start_time", {}).get("time_str"),
+                "start_timestamp_s": h.get("start_time", {}).get("timestamp_s"),
+                "end_time": h.get("end_time", {}).get("time_str"),
+                "end_timestamp_s": h.get("end_time", {}).get("timestamp_s"),
+                "duration_s": h.get("duration_s"),
+                "items_added": [
+                    {
+                        "item": it.get("item"),
+                        "time": it.get("time_str"),
+                        "timestamp_s": it.get("timestamp_s"),
+                    }
+                    for it in h.get("items_added", [])
+                ],
+                "item_summary": ", ".join(h.get("item_names", [])),
+                "wrapping_completed": h.get("wrapping", {}).get("done_at_str")
+                or h.get("wrapping", {}).get("closing_at_str"),
+            }
+            for h in hotdogs_list
+        ],
     }
 
     # ──────────────────────────────────────────────────────────────────────
@@ -207,13 +309,17 @@ def main():
     with open(SUMMARY_PATH, "w") as f:
         json.dump(full_summary, f, indent=2)
 
+    timeline_path = os.path.join(OUTPUT_DIR, "hotdog_timeline.json")
+    with open(timeline_path, "w") as f:
+        json.dump(timeline_summary, f, indent=2)
+
     # ──────────────────────────────────────────────────────────────────────
     # Print plain-text report
     # ──────────────────────────────────────────────────────────────────────
     print()
-    print("=" * 60)
-    print("  VIDEO SUMMARY REPORT")
-    print("=" * 60)
+    print("=" * 70)
+    print("  VIDEO SUMMARY & HOTDOG TIMELINE REPORT")
+    print("=" * 70)
     print(f"  Video             : {os.path.basename(VIDEO_PATH)}")
     print(f"  Run duration      : {full_summary['run_duration_s']}s")
     print(f"  Metrics snapshots : {metrics_count}")
@@ -222,23 +328,22 @@ def main():
     print(f"  Failed orders     : {full_summary['failed_orders']}")
     print(f"  Accuracy          : {full_summary['accuracy_pct']}%")
     print()
-    print(f"  Hotdogs detected  : {full_summary['total_hotdogs']}")
+    print(f"  Total Hotdogs     : {full_summary['total_hotdogs']}")
+    print(f"  Completed/Wrapped : {full_summary['completed_hotdogs']}")
     print()
 
-    if orders_summary:
-        print("  Per-Hotdog Item Log:")
-        print("  " + "-" * 40)
-        for order_key, rec in orders_summary.items():
-            hid = rec.get("hotdog_id", order_key)
-            items = rec.get("item_names", [])
-            item_counts = rec.get("item_counts", {})
-            item_str = ", ".join(items) if items else "(none detected)"
-            if item_counts:
-                count_str = ", ".join(
-                    f"{name}={count}" for name, count in sorted(item_counts.items())
-                )
-                item_str = f"{item_str} | counts: {count_str}"
-            print(f"  {order_key} [{hid}]: {item_str}")
+    if hotdogs_list:
+        print("  Hotdog Timeline & Ingredient Log:")
+        print("  " + "-" * 66)
+        for h in hotdogs_list:
+            hid = h.get("hotdog_id")
+            st = h.get("status", "unknown").upper()
+            start_str = h.get("start_time", {}).get("time_str") or "00:00:00"
+            end_str = h.get("end_time", {}).get("time_str") or "--:--:--"
+            dur = h.get("duration_s", 0.0)
+            items = h.get("items_added", [])
+            item_str = ", ".join(f"[{it.get('time_str')}] {it.get('item')}" for it in items) if items else "(none)"
+            print(f"  Hotdog #{hid} [{st}]: {start_str} -> {end_str} ({dur}s) | Items: {item_str}")
     else:
         print("  (No hotdog item associations recorded)")
 
@@ -251,17 +356,9 @@ def main():
         print("    (none — no metrics events received)")
 
     print()
-    print("  JSON Summary (order-style):")
-    print("  " + "-" * 40)
-    compact = {
-        k: {"hotdog_id": v.get("hotdog_id", k), "items": v.get("item_names", [])}
-        for k, v in orders_summary.items()
-    }
-    print("  " + json.dumps(compact, indent=4).replace("\n", "\n  "))
-
-    print()
-    print(f"  Full JSON saved -> {SUMMARY_PATH}")
-    print("=" * 60)
+    print(f"  Full JSON saved     -> {SUMMARY_PATH}")
+    print(f"  Timeline JSON saved -> {timeline_path}")
+    print("=" * 70)
 
 
 if __name__ == "__main__":
