@@ -30,6 +30,7 @@ class Detection:
     bbox: Tuple[int, int, int, int]
     class_name: str
     confidence: float
+    polygon: Optional[List[Tuple[float, float]]] = None
 
 
 @dataclass

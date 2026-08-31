@@ -91,6 +91,60 @@ def _hotdog_coverage_ratio(
     return float(inter_w * inter_h) / float(hotdog_area)
 
 
+def _polygon_coverage_ratio(
+    hotdog_polygon: Optional[List],
+    wrapping_polygon: Optional[List],
+    hotdog_bbox: Tuple[int, int, int, int],
+    wrapping_bbox: Tuple[int, int, int, int],
+) -> float:
+    """
+    Pixel-accurate polygon ∩ polygon coverage ratio.
+    """
+    import cv2 as _cv2
+    import numpy as _np
+
+    if (
+        hotdog_polygon is not None and len(hotdog_polygon) >= 3
+        and wrapping_polygon is not None and len(wrapping_polygon) >= 3
+    ):
+        try:
+            # Build a small canvas sized to the union of both bboxes
+            hx1, hy1, hx2, hy2 = hotdog_bbox
+            wx1, wy1, wx2, wy2 = wrapping_bbox
+            x_min = max(0, min(hx1, wx1))
+            y_min = max(0, min(hy1, wy1))
+            x_max = max(hx2, wx2)
+            y_max = max(hy2, wy2)
+            W = max(x_max - x_min + 2, 2)
+            H = max(y_max - y_min + 2, 2)
+
+            # Offset polygons to local canvas coordinates
+            h_pts = _np.array(
+                [(int(p[0]) - x_min, int(p[1]) - y_min) for p in hotdog_polygon],
+                dtype=_np.int32,
+            )
+            w_pts = _np.array(
+                [(int(p[0]) - x_min, int(p[1]) - y_min) for p in wrapping_polygon],
+                dtype=_np.int32,
+            )
+
+            mask_h = _np.zeros((H, W), dtype=_np.uint8)
+            mask_w = _np.zeros((H, W), dtype=_np.uint8)
+            _cv2.fillPoly(mask_h, [h_pts], 1)
+            _cv2.fillPoly(mask_w, [w_pts], 1)
+
+            hotdog_area = float(_np.count_nonzero(mask_h))
+            if hotdog_area <= 0:
+                return 0.0
+            intersection = float(_np.count_nonzero(mask_h & mask_w))
+            return intersection / hotdog_area
+        except Exception:
+            pass  # fall through to bbox fallback
+
+    # Bbox fallback
+    return _hotdog_coverage_ratio(hotdog_bbox, wrapping_bbox)
+
+
 # ── Per-ID state record ────────────────────────────────────────────────────────
 
 @dataclass
@@ -182,7 +236,8 @@ class WrappingStateMachine:
         frame_idx: int,
         current_time: float,
         hotdog_detections: list,     # List[Detection] class_name == "hot-dog"
-        wrapping_detections: list,   # List[Detection] class_name == "wrapping"
+        wrapping_detections: list,   # List[Detection] class_name == "wrapper" / "wrapping"
+        wrapped_detections: list = [], # List[Detection] class_name == "wrapped"
         video_ending_soon: bool = False,
     ) -> List[dict]:
         """
@@ -206,6 +261,7 @@ class WrappingStateMachine:
         # ── Build this-frame hotdog index (skip retired IDs immediately) ───────
         active_tids: Set[int] = set()
         tid_to_bbox: Dict[int, Tuple[int, int, int, int]] = {}
+        tid_to_polygon: Dict[int, Optional[List]] = {}
 
         for det in hotdog_detections:
             tid = det.track_id
@@ -215,10 +271,14 @@ class WrappingStateMachine:
                 continue
             active_tids.add(tid)
             tid_to_bbox[tid] = det.bbox
+            tid_to_polygon[tid] = getattr(det, "polygon", None)
 
-        # ── Collect wrapping bboxes this frame ─────────────────────────────────
+        # ── Collect wrapping detections this frame ──────────────────────────────
         wrapping_bboxes: List[Tuple[int, int, int, int]] = [
             d.bbox for d in wrapping_detections
+        ]
+        wrapping_polygons: List[Optional[List]] = [
+            getattr(d, "polygon", None) for d in wrapping_detections
         ]
 
         # ── Step 1: Process all visible hotdogs ────────────────────────────────
@@ -240,12 +300,14 @@ class WrappingStateMachine:
             if rec.state != STATE_ACTIVE:
                 continue
 
-            # ── Check whether any wrapping bbox covers >= min_coverage_ratio
-            # of this hotdog bbox (default 70 %).  Any partial intersection
-            # below this threshold is ignored to prevent premature CLOSING.
+            # ── Check whether any wrapping mask/bbox covers >= min_coverage_ratio
+            # of this hotdog area.  Polygon-accurate when masks are available;
+            # falls back to bbox rectangle math otherwise.
+            hotdog_poly = tid_to_polygon.get(tid)
             best_coverage = 0.0
-            for wb in wrapping_bboxes:
-                coverage = _hotdog_coverage_ratio(bbox, wb)
+            for w_idx, wb in enumerate(wrapping_bboxes):
+                wrap_poly = wrapping_polygons[w_idx] if w_idx < len(wrapping_polygons) else None
+                coverage = _polygon_coverage_ratio(hotdog_poly, wrap_poly, bbox, wb)
                 if coverage > best_coverage:
                     best_coverage = coverage
 
@@ -330,18 +392,24 @@ class WrappingStateMachine:
 
             disappear_frames = (frame_idx - rec.disappear_frame) if rec.disappear_frame is not None else 0
 
-            # Fast-path for video ending (remaining_s <= 0.8s):
-            # When video is ending soon and wrapping/hotdog has disappeared for at least 5 frames,
-            # transition to DONE IMMEDIATELY without waiting for normal delay.
-            if video_ending_soon:
-                if disappear_frames < 5:
-                    continue
+            # Check if there is a 'wrapped' detection overlapping the hotdog's last known bbox
+            has_wrapped_overlap = False
+            if rec.last_bbox is not None:
+                for wd in wrapped_detections:
+                    if _boxes_intersect(rec.last_bbox, wd.bbox):
+                        has_wrapped_overlap = True
+                        break
+
+            # Fast-path: transition to DONE immediately if:
+            # 1. Video is ending soon and disappeared for at least 5 frames
+            # 2. OR we see a 'wrapped' detection overlapping the last known hotdog position
+            if (video_ending_soon and disappear_frames >= 5) or has_wrapped_overlap:
                 rec.state      = STATE_DONE
                 rec.done_frame = frame_idx
                 rec.done_time  = current_time
                 self.done_ids.add(tid)
                 logger.info(
-                    "[WRAPPING] hotdog tid=%d  CLOSING → DONE (video ending immediate, disappeared %d frames)  "
+                    "[WRAPPING] hotdog tid=%d  CLOSING → DONE (immediate wrapped/end, disappeared %d frames)  "
                     "frame=%d  t=%.2fs",
                     tid, disappear_frames, frame_idx, current_time,
                 )

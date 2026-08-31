@@ -1,7 +1,7 @@
 source: videos/order1.mp4
 
-model_type: yolo
-model_path: rf_trained/weights.pt
+model_type: yolo-seg
+model_path: "rf_trained/weights (1).pt"
 secondary_model_path:        # disabled: models/weights.pt not present; run on primary model only
 tracker_type: bytetrack
 

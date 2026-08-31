@@ -189,6 +189,48 @@ def test_hand_proximity_tie_breaker_disambiguates_neighbors():
     assert log[2]["hotdog_id"] == "2"
 
 
+def test_hand_carried_hotdog_wins_over_stationary_assembly_candidate():
+    """A placement under the carrying hand keeps the lost hotdog's ID."""
+    tracker = HotdogTracker(orphan_timeout_s=5.0)
+
+    carried = Detection(track_id=1, bbox=(100, 300, 160, 340), class_name="hot-dog", confidence=0.9)
+    stationary = Detection(track_id=2, bbox=(500, 300, 560, 340), class_name="hot-dog", confidence=0.9)
+    pickup_hand = Detection(track_id=10, bbox=(110, 290, 150, 330), class_name="hand", confidence=0.9)
+    tracker.update([carried, stationary, pickup_hand], current_time=0.0)
+    carried_tid = tracker._detector_id_map[1]
+
+    # Both detections blink out, but only the carried hotdog is associated
+    # with the hand moving to the assembly station.
+    transit_hand = Detection(track_id=10, bbox=(300, 290, 340, 330), class_name="hand", confidence=0.9)
+    tracker.update([transit_hand], current_time=0.1)
+    assert tracker._last_lost_by_hand[10]["tid"] == carried_tid
+
+    # The placement is exactly where the unrelated stationary track was last
+    # seen.  It must recover the carried ID, not steal/relabel the station ID.
+    placed = Detection(track_id=20, bbox=(500, 300, 560, 340), class_name="hot-dog", confidence=0.9)
+    placed_hand = Detection(track_id=10, bbox=(510, 290, 550, 330), class_name="hand", confidence=0.9)
+    tracker.update([placed, placed_hand], current_time=0.2)
+
+    assert tracker._detector_id_map[20] == carried_tid
+    assert tracker._records[carried_tid].bbox == placed.bbox
+
+
+def test_one_hand_cannot_mark_adjacent_hotdogs_as_carried():
+    """A broad hand box must keep one carried identity, not overwrite it."""
+    tracker = HotdogTracker(orphan_timeout_s=5.0)
+    left = Detection(track_id=1, bbox=(100, 300, 160, 340), class_name="hot-dog", confidence=0.9)
+    right = Detection(track_id=2, bbox=(180, 300, 240, 340), class_name="hot-dog", confidence=0.9)
+    hand = Detection(track_id=10, bbox=(100, 290, 160, 330), class_name="hand", confidence=0.9)
+
+    tracker.update([left, right, hand], current_time=0.0)
+    left_tid = tracker._detector_id_map[1]
+
+    # The hand can still be within the padded area of both hotdogs, but only
+    # the one nearest its working point may be recorded as carried/lost.
+    tracker.update([hand], current_time=0.1)
+    assert tracker._last_lost_by_hand[10]["tid"] == left_tid
+
+
 def test_regression_metrics_reported_in_summary():
     """Verify that occlusion events and regression metrics are exposed in get_summary()."""
     tracker = HotdogTracker(orphan_timeout_s=1.0)

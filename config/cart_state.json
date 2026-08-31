@@ -1,0 +1,93 @@
+{
+  "state": "EMPTY",
+  "container_id": null,
+  "ingredients": [],
+  "created_at": 1788118878.110759,
+  "updated_at": 1788119008.7229497,
+  "transition_history": [
+    {
+      "from": "EMPTY",
+      "to": "RESET",
+      "timestamp": 1788118900.0128474,
+      "reason": "System start clean session"
+    },
+    {
+      "from": "RESET",
+      "to": "EMPTY",
+      "timestamp": 1788118900.0138507,
+      "reason": "Cart state cleared and restored to EMPTY after removal"
+    },
+    {
+      "from": "EMPTY",
+      "to": "BUILDING",
+      "timestamp": 1788118907.2983038,
+      "reason": "First ingredient added: chilli"
+    },
+    {
+      "from": "BUILDING",
+      "to": "EMPTY",
+      "timestamp": 1788118907.2998226,
+      "reason": "No active hotdogs remaining on screen"
+    },
+    {
+      "from": "EMPTY",
+      "to": "READY",
+      "timestamp": 1788118965.974511,
+      "reason": "Hotdog detected in video feed"
+    },
+    {
+      "from": "READY",
+      "to": "BUILDING",
+      "timestamp": 1788118967.895451,
+      "reason": "Hotdog entered assembly ROI"
+    },
+    {
+      "from": "BUILDING",
+      "to": "DONE",
+      "timestamp": 1788118993.2007077,
+      "reason": "Hotdog wrapped and exited"
+    },
+    {
+      "from": "DONE",
+      "to": "READY",
+      "timestamp": 1788118993.2941525,
+      "reason": "Hotdog detected in video feed"
+    },
+    {
+      "from": "READY",
+      "to": "BUILDING",
+      "timestamp": 1788118993.2951524,
+      "reason": "Hotdog entered assembly ROI"
+    },
+    {
+      "from": "BUILDING",
+      "to": "EMPTY",
+      "timestamp": 1788119002.0280616,
+      "reason": "No active hotdogs remaining on screen"
+    },
+    {
+      "from": "EMPTY",
+      "to": "BUILDING",
+      "timestamp": 1788119002.247267,
+      "reason": "First ingredient added: wrapped_hotdog"
+    },
+    {
+      "from": "BUILDING",
+      "to": "EMPTY",
+      "timestamp": 1788119002.2494717,
+      "reason": "No active hotdogs remaining on screen"
+    },
+    {
+      "from": "EMPTY",
+      "to": "DONE",
+      "timestamp": 1788119008.6019945,
+      "reason": "Hotdog wrapped and exited"
+    },
+    {
+      "from": "DONE",
+      "to": "EMPTY",
+      "timestamp": 1788119008.7229497,
+      "reason": "No active hotdogs remaining on screen"
+    }
+  ]
+}

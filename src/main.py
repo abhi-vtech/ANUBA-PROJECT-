@@ -48,6 +48,51 @@ def _boxes_overlap(bbox_a, bbox_b) -> bool:
     return ax1 < bx2 and ax2 > bx1 and ay1 < by2 and ay2 > by1
 
 
+def _poly_centroid(det):
+    """Return (cx, cy) using the segmentation polygon centroid when available,
+    falling back to the bbox midpoint."""
+    poly = getattr(det, "polygon", None)
+    if poly is not None and len(poly) >= 3:
+        arr = np.array(poly, dtype=np.float32)
+        return float(arr[:, 0].mean()), float(arr[:, 1].mean())
+    x1, y1, x2, y2 = det.bbox
+    return (x1 + x2) / 2.0, (y1 + y2) / 2.0
+
+
+def _poly_or_box_overlap(det_a, det_b) -> bool:
+    """True if polygon contours intersect (pixel-accurate when both have masks),
+    else falls back to bbox overlap."""
+    poly_a = getattr(det_a, "polygon", None)
+    poly_b = getattr(det_b, "polygon", None)
+    if (
+        poly_a is not None and len(poly_a) >= 3
+        and poly_b is not None and len(poly_b) >= 3
+    ):
+        try:
+            ax1, ay1, ax2, ay2 = det_a.bbox
+            bx1, by1, bx2, by2 = det_b.bbox
+            x_min = max(0, min(ax1, bx1))
+            y_min = max(0, min(ay1, by1))
+            x_max = max(ax2, bx2)
+            y_max = max(ay2, by2)
+            W = max(x_max - x_min + 2, 2)
+            H = max(y_max - y_min + 2, 2)
+            pts_a = np.array(
+                [(int(p[0]) - x_min, int(p[1]) - y_min) for p in poly_a], dtype=np.int32
+            )
+            pts_b = np.array(
+                [(int(p[0]) - x_min, int(p[1]) - y_min) for p in poly_b], dtype=np.int32
+            )
+            m_a = np.zeros((H, W), dtype=np.uint8)
+            m_b = np.zeros((H, W), dtype=np.uint8)
+            cv2.fillPoly(m_a, [pts_a], 1)
+            cv2.fillPoly(m_b, [pts_b], 1)
+            return bool(np.any(m_a & m_b))
+        except Exception:
+            pass
+    return _boxes_overlap(det_a.bbox, det_b.bbox)
+
+
 # Per-class bounding box colors (BGR)
 CLASS_COLORS = {
     "hand": (0, 255, 0),
@@ -238,9 +283,51 @@ def _update_trail_buffer(detections, current_time: float):
     for tid in [t for t, k in list(_TRAIL_KEY.items()) if k in stale_set or _is_done(t)]:
         _TRAIL_KEY.pop(tid, None)
 
+def _draw_dashed_rect(img, pt1, pt2, color, thickness=1, style='dotted'):
+    x1, y1 = pt1
+    x2, y2 = pt2
+    points = [
+        ((x1, y1), (x2, y1)),
+        ((x2, y1), (x2, y2)),
+        ((x2, y2), (x1, y2)),
+        ((x1, y2), (x1, y1))
+    ]
+    dash_len = 8 if style == 'dashed' else 4
+    for p1, p2 in points:
+        dist = ((p1[0] - p2[0]) ** 2 + (p1[1] - p2[1]) ** 2) ** 0.5
+        dashes = int(dist / dash_len)
+        for i in range(dashes):
+            if i % 2 == 0:
+                start_x = int(p1[0] + (p2[0] - p1[0]) * i / dashes)
+                start_y = int(p1[1] + (p2[1] - p1[1]) * i / dashes)
+                end_x = int(p1[0] + (p2[0] - p1[0]) * (i + 1) / dashes)
+                end_y = int(p1[1] + (p2[1] - p1[1]) * (i + 1) / dashes)
+                cv2.line(img, (start_x, start_y), (end_x, end_y), color, thickness)
 
 def draw_annotations(frame, detections, zones, current_order):
     h, w = frame.shape[:2]
+    
+    # ── Draw System ROI ────────────────────────────────────────────────────────
+    import os, json
+    from src.paths import resource
+    if not hasattr(draw_annotations, "_system_roi"):
+        roi_path = resource("config/system_roi.json")
+        draw_annotations._system_roi = None
+        if os.path.exists(roi_path):
+            try:
+                with open(roi_path, 'r') as f:
+                    draw_annotations._system_roi = json.load(f)
+            except Exception:
+                pass
+                
+    if draw_annotations._system_roi:
+        roi = draw_annotations._system_roi
+        rx, ry, rw, rh = roi.get('x', 0), roi.get('y', 0), roi.get('w', 0), roi.get('h', 0)
+        if rw > 0 and rh > 0:
+            cv2.rectangle(frame, (rx, ry), (rx + rw, ry + rh), (255, 0, 255), 3, cv2.LINE_AA)
+            cv2.putText(frame, "Active ROI", (rx, max(0, ry - 10)), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 0, 255), 2)
+    # ───────────────────────────────────────────────────────────────────────────
+    
     for zone in zones.get_all():
         poly = [(int(p[0] * w), int(p[1] * h)) for p in zone.polygon]
         color = hex_to_bgr(zone.color)
@@ -315,8 +402,10 @@ def draw_annotations(frame, detections, zones, current_order):
     for det in detections:
         x1, y1, x2, y2 = det.bbox
         color = CLASS_COLORS.get(det.class_name, DEFAULT_BBOX_COLOR)
+        poly = getattr(det, "polygon", None)
+        has_poly = poly is not None and len(poly) >= 3
 
-        if det.class_name == "hot-dog":
+        if det.class_name in ("hot-dog", "wrapped"):
             # Match record in hotdog_log to find monotonic hotdog_id
             matched_rec = None
             raw_tid = getattr(det, "track_id", None)
@@ -334,7 +423,9 @@ def draw_annotations(frame, detections, zones, current_order):
                 best_score = float("inf")
                 for rec in hotdog_log.values():
                     if rec.get("retired") or rec.get("active") is False:
-                        continue
+                        if det.class_name != "wrapped":
+                            # Only allow 'wrapped' class to match retired hotdog records
+                            continue
                     rx1, ry1, rx2, ry2 = rec.get("bbox", (0, 0, 0, 0))
                     rcx = (rx1 + rx2) / 2.0
                     rcy = (ry1 + ry2) / 2.0
@@ -355,8 +446,10 @@ def draw_annotations(frame, detections, zones, current_order):
                 if not any(mono == raw_tid for mono in detector_id_map.values() if mono != raw_tid):
                     matched_rec = hotdog_log[raw_tid]
 
+            inferred = False
             if matched_rec:
                 hid = matched_rec.get("hotdog_id")
+                inferred = matched_rec.get("inferred_position", False)
             elif raw_tid is not None and raw_tid in detector_id_map:
                 hid = str(detector_id_map[raw_tid])
             elif raw_tid not in (-1, None, "?"):
@@ -369,9 +462,18 @@ def draw_annotations(frame, detections, zones, current_order):
             
             label_text = f"#{hid}"
 
-            # Draw distinct hot-dog bounding box & compact ID header (#1)
-            color = (0, 140, 255)  # Vibrant orange (BGR)
-            cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+            # ── Draw filled segmentation mask + orange contour (no bounding box) ──
+            seg_color   = (0, 140, 255)   # Vibrant orange (BGR)
+            fill_alpha  = 0.30
+
+            if has_poly:
+                pts = np.array(poly, dtype=np.int32)
+                # Semi-transparent fill
+                overlay = frame.copy()
+                cv2.fillPoly(overlay, [pts], seg_color)
+                cv2.addWeighted(overlay, fill_alpha, frame, 1.0 - fill_alpha, 0, frame)
+                # Solid contour
+                cv2.polylines(frame, [pts], isClosed=True, color=seg_color, thickness=2)
 
             font = cv2.FONT_HERSHEY_SIMPLEX
             font_scale = 0.60
@@ -381,7 +483,7 @@ def draw_annotations(frame, detections, zones, current_order):
             lbl_y1 = max(0, y1 - text_h - 8)
             lbl_y2 = y1
             cv2.rectangle(frame, (x1, lbl_y1), (x1 + text_w + 10, lbl_y2), (0, 100, 220), -1)
-            cv2.rectangle(frame, (x1, lbl_y1), (x1 + text_w + 10, lbl_y2), color, 1)
+            cv2.rectangle(frame, (x1, lbl_y1), (x1 + text_w + 10, lbl_y2), seg_color, 1)
 
             cv2.putText(
                 frame,
@@ -393,7 +495,15 @@ def draw_annotations(frame, detections, zones, current_order):
                 thickness,
             )
         else:
-            cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+            # ── All other classes: filled mask + colored contour ──────────────
+            fill_alpha = 0.25
+            if has_poly:
+                pts = np.array(poly, dtype=np.int32)
+                overlay = frame.copy()
+                cv2.fillPoly(overlay, [pts], color)
+                cv2.addWeighted(overlay, fill_alpha, frame, 1.0 - fill_alpha, 0, frame)
+                cv2.polylines(frame, [pts], isClosed=True, color=color, thickness=2)
+
             label_text = det.class_name
             font = cv2.FONT_HERSHEY_SIMPLEX
             font_scale = 0.50
@@ -493,20 +603,25 @@ def _draw_exit_line_overlays(
             if getattr(wrap_state, "state", None) in ("closing", "done") and h_id not in wrapped_ids:
                 wrapped_ids.append(h_id)
 
-    if not wrapped_ids:
-        h_log = hotdog_tracker.get_hotdog_log()
-        wrapped_ids = [rec.get("hotdog_id", tid) for tid, rec in h_log.items()]
+    # Monotonic mapping
+    wrapped_mono_ids = []
+    for wid in wrapped_ids:
+        _mono = hotdog_tracker._detector_id_map.get(wid, wid)
+        if _mono not in wrapped_mono_ids:
+            wrapped_mono_ids.append(_mono)
 
     evt = _main_exit_detector.check_crossing(
         hand_bboxes=hand_bboxes,
-        wrapped_hotdog_ids=wrapped_ids,
+        wrapped_hotdog_ids=wrapped_mono_ids,
         frame_width=w,
         frame_height=h,
     )
 
     if evt:
         logger.info(f"🔥 [EXIT LINE] Outgoing Hotdog Detected! Exited: {evt.exited_hotdog_ids}")
-        add_event("container_removed", zone="Exit_Line_ROI", item="hotdog_exited")
+        from src.dashboard import record_hotdog_exit
+        record_hotdog_exit(evt.exited_hotdog_ids)
+        add_event("hotdog_exited", zone="Exit_Line_ROI", item="hotdog_exited")
 
     return _main_exit_detector.draw_overlay(frame)
 
@@ -610,6 +725,15 @@ def main():
     )
     logging.getLogger("src.temporal").setLevel(logging.DEBUG)
     logging.getLogger("src.metrics").setLevel(logging.INFO)
+
+    log_path = Path("output/yolo_detections.log")
+    if log_path.exists():
+        try:
+            log_path.unlink()
+        except OSError:
+            pass
+    with open(log_path, "w") as f:
+        f.write("=== YOLO Detections Log ===\n")
 
     # EXIT_ON_END: when set to "true", exit cleanly after the first video ends
     # instead of looping through the video playlist.  Used by run_10min_video.py.
@@ -908,6 +1032,12 @@ def main():
             detections = detector.detect(frame, conf_threshold=confidence)
             detect_ms = (time.perf_counter() - detect_start) * 1000.0
 
+            # Log YOLO detections for debugging
+            with open("output/yolo_detections.log", "a") as f:
+                f.write(f"Frame {frame_count}:\n")
+                for d in detections:
+                    f.write(f"  {d.class_name} ({d.confidence:.2f}) [ID:{d.track_id}] {d.bbox}\n")
+
             hand_detections = [d for d in detections if d.class_name == HAND_CLASS]
 
             h, w = frame.shape[:2]
@@ -930,8 +1060,9 @@ def main():
                 """Return True if this sauce detection should be shown/processed."""
                 if det.class_name not in SAUCE_CLASSES:
                     return True  # non-sauce detections always visible
-                cx_n = ((det.bbox[0] + det.bbox[2]) / 2) / w
-                cy_n = ((det.bbox[1] + det.bbox[3]) / 2) / h
+                # Use polygon centroid when available (more accurate than bbox midpoint)
+                cx, cy = _poly_centroid(det)
+                cx_n, cy_n = cx / w, cy / h
                 # Allow if inside vessel zone
                 if _vessel_zones_vis:
                     for vz in _vessel_zones_vis:
@@ -941,12 +1072,16 @@ def main():
                         ) >= 0:
                             return True
                 # Allow if in assembly zone
-                bz = zones.get_zone_for_bbox(det.bbox, w, h)
+                bz = zones.get_zone_for_bbox(
+                    det.bbox, w, h, seg_polygon=getattr(det, "polygon", None)
+                )
                 if bz is not None and bz.zone_type == "assembly":
                     return True
-                # Allow if overlapping food
-                if any(_boxes_overlap(det.bbox, fb) for fb in _food_bboxes_vis):
-                    return True
+                # Allow if overlapping food (polygon-accurate)
+                for fd in detections:
+                    if fd.class_name in {"hot-dog", "burger_bun", "french_fries"}:
+                        if _poly_or_box_overlap(det, fd):
+                            return True
                 return False  # suppress
 
             visible_detections = [d for d in detections if _sauce_is_visible(d)]
@@ -1011,6 +1146,37 @@ def main():
             # Food classes that qualify as "sauce being applied to food"
             _FOOD_CLASSES = {"hot-dog", "burger_bun", "french_fries"}
             food_bboxes = [d.bbox for d in detections if d.class_name in _FOOD_CLASSES]
+            KETCHUP_HOTDOG_PROXIMITY_PX = 140.0
+
+            def _in_assembly(bbox, polygon=None) -> bool:
+                zone = zones.get_zone_for_bbox(bbox, w, h, seg_polygon=polygon)
+                return zone is not None and zone.zone_type == "assembly"
+
+            def _near_assembly_hotdog(sauce_det) -> bool:
+                """Require ketchup and its target hotdog to share assembly space."""
+                scx, scy = _poly_centroid(sauce_det)
+
+                # Prefer current visual detections, which are the most precise.
+                candidates = [
+                    (d.bbox, getattr(d, "polygon", None))
+                    for d in detections
+                    if d.class_name == "hot-dog"
+                ]
+                # Retain continuity during a brief hand occlusion of the hotdog.
+                candidates.extend(
+                    (rec.bbox, None)
+                    for rec in hotdog_tracker._records.values()
+                    if not rec.retired
+                )
+                for hotdog_bbox, hotdog_polygon in candidates:
+                    if not _in_assembly(hotdog_bbox, hotdog_polygon):
+                        continue
+                    hcx = (hotdog_bbox[0] + hotdog_bbox[2]) / 2.0
+                    hcy = (hotdog_bbox[1] + hotdog_bbox[3]) / 2.0
+                    distance = ((scx - hcx) ** 2 + (scy - hcy) ** 2) ** 0.5
+                    if _boxes_overlap(sauce_det.bbox, hotdog_bbox) or distance <= KETCHUP_HOTDOG_PROXIMITY_PX:
+                        return True
+                return False
 
             # Reset per-class frame counters and session flags for sauce classes absent this frame
             detected_sauce_classes = {
@@ -1035,6 +1201,11 @@ def main():
 
                 # ── Zone A: bottle is resting in the vessel zone ──────────────
                 # Suppress — it's just sitting there.  Reset frame counter and session applied flag.
+                # Use polygon centroid when available
+                bottle_cx, bottle_cy = _poly_centroid(det)
+                cx_n = bottle_cx / w
+                cy_n = bottle_cy / h
+
                 if vessel_zones:
                     in_vessel = any(
                         cv2.pointPolygonTest(
@@ -1055,15 +1226,31 @@ def main():
                 # ── Zone C: somewhere on the counter but NOT assembly / food ──
                 # Suppress — false positive near ingredient bins, reflections,
                 # or bottle in mid-air transit not yet over food.
-                bottle_zone = zones.get_zone_for_bbox(det.bbox, w, h)
+                bottle_zone = zones.get_zone_for_bbox(
+                    det.bbox, w, h, seg_polygon=getattr(det, "polygon", None)
+                )
                 in_assembly  = (bottle_zone is not None and bottle_zone.zone_type == "assembly")
-                overlaps_food = any(_boxes_overlap(det.bbox, fb) for fb in food_bboxes)
+                # Polygon-accurate overlap check with food objects
+                overlaps_food = any(
+                    _poly_or_box_overlap(det, fd_det)
+                    for fd_det in detections
+                    if fd_det.class_name in _FOOD_CLASSES
+                )
 
                 if not in_assembly and not overlaps_food:
                     _sauce_frames[det.class_name] = 0
                     for k in list(_sauce_applied.keys()):
                         if isinstance(k, tuple) and k[0] == det.class_name:
                             del _sauce_applied[k]
+                    continue
+
+                # Ketchup is valid only while the bottle is in assembly and
+                # actually close to an assembly hotdog.  Do not count a bottle
+                # merely sitting in the assembly area or passing through it.
+                if det.class_name == "ketchup_sauce" and (
+                    not in_assembly or not _near_assembly_hotdog(det)
+                ):
+                    _sauce_frames[det.class_name] = 0
                     continue
 
                 # ── Zone B: bottle in assembly zone or directly over food ─────
@@ -1106,7 +1293,11 @@ def main():
                         bottle_cx = (det.bbox[0] + det.bbox[2]) / 2.0
                         bottle_cy = (det.bbox[1] + det.bbox[3]) / 2.0
                         
-                        PROXIMITY_THRESHOLD_PX = 250.0
+                        PROXIMITY_THRESHOLD_PX = (
+                            KETCHUP_HOTDOG_PROXIMITY_PX
+                            if det.class_name == "ketchup_sauce"
+                            else 250.0
+                        )
                         nearby_hotdog_tids = []
                         closest_tid = None
                         closest_dist = float('inf')
@@ -1137,18 +1328,22 @@ def main():
                                 
                         if nearby_hotdog_tids:
                             resolved_hotdog_tids = nearby_hotdog_tids
-                        elif closest_tid is not None and closest_dist <= 400.0:
+                        elif (
+                            closest_tid is not None
+                            and closest_dist <= PROXIMITY_THRESHOLD_PX
+                        ):
                             resolved_hotdog_tids = [closest_tid]
 
                     if not resolved_hotdog_tids:
-                        # No hand visible — fall back to old bbox-overlap logic
-                        hotdog_bboxes_under_bottle = [
-                            d.bbox for d in detections
+                        # No hand visible — fall back to polygon-overlap logic
+                        hotdogs_under_bottle = [
+                            d for d in detections
                             if d.class_name == "hot-dog"
-                            and _boxes_overlap(det.bbox, d.bbox)
+                            and _poly_or_box_overlap(det, d)
                         ]
-                        fire_count = max(1, len(hotdog_bboxes_under_bottle))
-                        resolved_hotdog_tids = [None] * fire_count
+                        if hotdogs_under_bottle:
+                            # Safely map to exactly the specific hotdogs under the sauce
+                            resolved_hotdog_tids = [d.track_id for d in hotdogs_under_bottle]
 
 
                     for resolved_tid in resolved_hotdog_tids:
@@ -1279,8 +1474,16 @@ def main():
 
             # ── Hotdog tracker update (ByteTrack + Monotonic IDs + POS Fusion) ──
             active_ticket_id = state_machine.current_ticket.ticket_id if state_machine.current_ticket else None
+            # Ketchup is attributed above through the strict assembly +
+            # target-hotdog gate.  Do not feed raw ketchup detections into
+            # HotdogTracker as well: its generic item association can otherwise
+            # create a second, ungated ketchup event for a nearby/stale track.
+            # Mustard continues through the normal tracker path.
+            tracker_detections = [
+                det for det in detections if det.class_name != "ketchup_sauce"
+            ]
             hotdog_tracker.update(
-                detections,
+                tracker_detections,
                 current_time=current_time,
                 frame=frame,
                 active_ticket_id=active_ticket_id,
@@ -1315,7 +1518,8 @@ def main():
                 frame_idx=frame_count,
                 current_time=current_time,
                 hotdog_detections=_hotdog_dets_mono,
-                wrapping_detections=[d for d in detections if d.class_name == "wrapping"],
+                wrapping_detections=[d for d in detections if d.class_name in ("wrapping", "wrapper")],
+                wrapped_detections=[d for d in detections if d.class_name == "wrapped"],
                 video_ending_soon=is_ending_soon,
             )
             # Print state transitions to terminal immediately for visibility
@@ -1386,14 +1590,17 @@ def main():
             # ── Automated Cart State Machine Transitions ───────────────────────
             from src.cart_state_machine import CartEvent, EventType
 
-            hotdog_dets = [d for d in detections if d.class_name == "hot-dog"]
-            if hotdog_dets:
+            # Check active hotdogs in tracker (with persistence to prevent flickering)
+            has_active_hotdogs = len(hotdog_tracker._records) > 0
+            if has_active_hotdogs:
                 cart_machine.process_event(CartEvent(event_type=EventType.HOTDOG_DETECTED))
-                for hd in hotdog_dets:
-                    z = zones.get_zone_for_bbox(hd.bbox, w, h, is_hand=False)
+                for tid, rec in hotdog_tracker._records.items():
+                    z = zones.get_zone_for_bbox(rec.bbox, w, h, is_hand=False)
                     if z and z.zone_type == "assembly":
                         cart_machine.process_event(CartEvent(event_type=EventType.ENTERED_ASSEMBLY))
                         break
+            else:
+                cart_machine.process_event(CartEvent(event_type=EventType.NO_HOTDOGS))
 
             draw_annotations._hotdog_log_ref = hotdog_tracker.get_hotdog_log()
             draw_annotations._current_video_time = current_time

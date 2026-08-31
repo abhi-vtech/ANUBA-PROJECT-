@@ -21,7 +21,7 @@
       "pickles (rounds)": 11,
       "tomato": 1
     },
-    "time": "06:01 PM",
+    "time": "01:13 AM",
     "missing_items": [
       "relish",
       "onions",
@@ -56,7 +56,7 @@
       "grated yellow cheese": 1,
       "pickles (rounds)": 1
     },
-    "time": "06:01 PM",
+    "time": "01:13 AM",
     "missing_items": [
       "relish",
       "onions",
@@ -92,7 +92,7 @@
       "grated yellow cheese": 1,
       "pickles (rounds)": 1
     },
-    "time": "06:01 PM",
+    "time": "01:13 AM",
     "missing_items": [
       "relish",
       "onions",
@@ -128,7 +128,7 @@
       "grated yellow cheese": 1,
       "pickles (rounds)": 1
     },
-    "time": "06:01 PM",
+    "time": "01:13 AM",
     "missing_items": [
       "relish",
       "onions",
@@ -136,6 +136,31 @@
       "sport (wax) peppers",
       "ketchup_sauce"
     ],
+    "extra_items": [
+      "yellow_mustard_sauce"
+    ],
+    "applied_sauces": [
+      "yellow_mustard_sauce"
+    ]
+  },
+  {
+    "ticket_id": "V1-05",
+    "status": "in_progress",
+    "passed": false,
+    "result": "extra item added",
+    "expected_items": [
+      "yellow_mustard_sauce",
+      "relish",
+      "onions",
+      "tomato",
+      "sport (wax) peppers",
+      "pickel swears",
+      "ketchup_sauce"
+    ],
+    "picked_counts": {
+      "yellow_mustard_sauce": 9
+    },
+    "time": "01:13 AM",
     "extra_items": [
       "yellow_mustard_sauce"
     ],

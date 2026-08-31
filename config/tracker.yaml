@@ -1,15 +1,15 @@
 # Tracker backend: botsort | bytetrack | deepsort
-tracker_type: bytetrack
+tracker_type: botsort
 
 # Shared parameters (botsort / bytetrack)
 # Note: track_low_thresh kept at 0.10 (was 0.05) — irrelevant in practice
 # since model.track() is called with conf=0.15; nothing below 0.15 reaches
 # the tracker.  All other values are original defaults.
-track_high_thresh: 0.5
+track_high_thresh: 0.35
 track_low_thresh: 0.10
-new_track_thresh: 0.6
+new_track_thresh: 0.35
 track_buffer: 3600
-match_thresh: 0.5
+match_thresh: 0.80
 fuse_score: True
 
 # BoT-SORT specifics
@@ -56,7 +56,7 @@ wrap_station:
   occlusion_buffer_s: 20.0    # coast 20 s (≈600 frames) before retiring in wrap zone
   hand_transit_reid_enabled: true  # Hand-transition in-flight occlusion transfer re-ID
   hand_transit_max_gap_s: 60.0     # Max transit gap (seconds) across hand relocations
-  stall_watchdog_window_s: 20.0   # merge window after retire → new-spawn in same zone
+  stall_watchdog_window_s: 20.0   # merge window after retire ➔ new-spawn in same zone
   max_hand_speed_px_per_frame: 55.0 # Max plausible hand travel speed (px/frame)
   hand_lost_timeout_frames: 180   # Max frames a hand-lost hotdog can stay pending
   hand_assoc_frame_window: 5      # Frame window for hand contact association

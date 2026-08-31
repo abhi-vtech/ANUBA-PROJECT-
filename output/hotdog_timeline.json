@@ -1,6 +1,55 @@
 {
   "video": "wienerschnitzel_10m.mkv",
-  "total_hotdogs": 0,
-  "completed_hotdogs": 0,
-  "hotdogs": []
+  "total_hotdogs": 2,
+  "completed_hotdogs": 2,
+  "hotdogs": [
+    {
+      "hotdog_id": "1",
+      "status": "done",
+      "undergone_wrapping": true,
+      "start_time": "00:00:19",
+      "start_timestamp_s": 19.52,
+      "end_time": "00:00:29",
+      "end_timestamp_s": 29.92,
+      "duration_s": 10.4,
+      "items_added": [
+        {
+          "item": "yellow_mustard_sauce",
+          "time": "00:00:21",
+          "timestamp_s": 21.49
+        },
+        {
+          "item": "yellow_mustard_sauce",
+          "time": "00:00:22",
+          "timestamp_s": 22.22
+        }
+      ],
+      "item_summary": "yellow_mustard_sauce, yellow_mustard_sauce",
+      "wrapping_completed": "00:00:29"
+    },
+    {
+      "hotdog_id": "2",
+      "status": "done",
+      "undergone_wrapping": true,
+      "start_time": "00:00:20",
+      "start_timestamp_s": 20.03,
+      "end_time": "00:00:25",
+      "end_timestamp_s": 25.73,
+      "duration_s": 5.7,
+      "items_added": [
+        {
+          "item": "yellow_mustard_sauce",
+          "time": "00:00:20",
+          "timestamp_s": 20.5
+        },
+        {
+          "item": "yellow_mustard_sauce",
+          "time": "00:00:21",
+          "timestamp_s": 21.43
+        }
+      ],
+      "item_summary": "yellow_mustard_sauce, yellow_mustard_sauce",
+      "wrapping_completed": "00:00:25"
+    }
+  ]
 }

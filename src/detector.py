@@ -1,5 +1,6 @@
 from typing import List, Optional
 
+import cv2
 import numpy as np
 import torch
 import yaml
@@ -66,10 +67,37 @@ class Detector:
 
             self.deepsort = DeepSort(**kwargs)
 
+        self.system_roi = None
+        import os
+        import json
+        roi_path = resource("config/system_roi.json")
+        if os.path.exists(roi_path):
+            try:
+                with open(roi_path, 'r') as f:
+                    self.system_roi = json.load(f)
+            except Exception:
+                pass
+
     def detect(self, frame: np.ndarray, conf_threshold: float = 0.5) -> List[Detection]:
         if self.tracker_type == "deepsort":
-            return self._detect_deepsort(frame, conf_threshold)
-        return self._detect_builtin(frame, conf_threshold)
+            detections = self._detect_deepsort(frame, conf_threshold)
+        else:
+            detections = self._detect_builtin(frame, conf_threshold)
+            
+        if self.system_roi:
+            filtered = []
+            rx, ry, rw, rh = self.system_roi.get('x', 0), self.system_roi.get('y', 0), self.system_roi.get('w', 0), self.system_roi.get('h', 0)
+            if rw > 0 and rh > 0:
+                for det in detections:
+                    if det.class_name in ("hot-dog", "burger_bun", "french_fries", "wrapping", "wrapped", "wrapper"):
+                        cx = (det.bbox[0] + det.bbox[2]) / 2
+                        cy = (det.bbox[1] + det.bbox[3]) / 2
+                        if not (rx <= cx <= rx + rw and ry <= cy <= ry + rh):
+                            continue
+                    filtered.append(det)
+                return filtered
+                
+        return detections
 
     def _detect_builtin(
         self, frame: np.ndarray, conf_threshold: float
@@ -88,22 +116,21 @@ class Detector:
             conf=min_conf,
             tracker=resource("config/tracker.yaml"),
             device=self.device,
+            retina_masks=True,  # User requested tight masks, this prevents low-res mask bleed
         )
         detections = []
         if results[0].boxes is not None:
             boxes = results[0].boxes
             ids = boxes.id
+            # Extract masks if available
+            masks = results[0].masks if hasattr(results[0], 'masks') else None
+            
             for idx in range(len(boxes)):
-                box = boxes.xyxy[idx]
                 conf = boxes.conf[idx]
                 cls = boxes.cls[idx]
                 track_id = int(ids[idx]) if ids is not None else -1
 
                 name = self.model.names[int(cls)]
-                # Use per-class override threshold if configured, else the
-                # global conf_threshold.  This allows "wrapping" (and any
-                # other class) to use a lower threshold without affecting
-                # the rest of the pipeline.
                 effective_threshold = self.class_conf_overrides.get(
                     name, conf_threshold
                 )
@@ -111,14 +138,30 @@ class Detector:
                     continue
                 if self.target_classes and name not in self.target_classes:
                     continue
-                detections.append(
-                    Detection(
-                        track_id=track_id,
-                        bbox=tuple(map(int, box.tolist())),
-                        class_name=name,
-                        confidence=float(conf),
-                    )
+
+                poly_pts = None
+                bbox = tuple(map(int, boxes.xyxy[idx].tolist()))
+                
+                # Apply segmentation polygon if available
+                if masks is not None and len(masks.xy) > idx:
+                    pts = masks.xy[idx]
+                    if pts is not None and len(pts) >= 3:
+                        poly_pts = pts.tolist()
+                        # Override YOLO's standard bbox with tight contour bounding rect
+                        px, py, pw, ph = cv2.boundingRect(pts.astype(np.int32))
+                        bbox = (px, py, px + pw, py + ph)
+
+                det = Detection(
+                    track_id=track_id,
+                    bbox=bbox,
+                    class_name=name,
+                    confidence=float(conf),
+                    polygon=poly_pts,
                 )
+                if poly_pts:
+                    det.polygon = poly_pts
+                    
+                detections.append(det)
 
         if self.secondary_model:
             sec_results = self.secondary_model.track(

@@ -99,9 +99,21 @@ def main():
     print("[INFO] Press Ctrl+C to abort.\n")
     sys.stdout.flush()
 
+    CONSOLE_LOG_PATH = os.path.join(OUTPUT_DIR, "console_output.log")
+    Path(OUTPUT_DIR).mkdir(parents=True, exist_ok=True)
+    console_file = open(CONSOLE_LOG_PATH, "w", encoding="utf-8")
+
+    def _log_print(*args, **kwargs):
+        msg = " ".join(str(a) for a in args)
+        print(msg, **kwargs)
+        console_file.write(msg + "\n")
+        console_file.flush()
+
     try:
         for line in process.stdout:
             line_s = line.rstrip()
+            console_file.write(line_s + "\n")
+            console_file.flush()
 
             # Try to parse as JSON metric/event line first
             parsed_as_json = False
@@ -116,7 +128,7 @@ def main():
                         fps = data.get("fps", 0)
                         total_ord = data.get("total_orders", 0)
                         metrics_count += 1
-                        print(
+                        _log_print(
                             f"  [{time.strftime('%H:%M:%S')}] "
                             f"elapsed={elapsed:.0f}s  fps={fps:.1f}  "
                             f"orders={total_ord}",
@@ -131,14 +143,14 @@ def main():
                         hl = data.get("hotdog_log", {})
                         raw_orders = hl.get("orders", {})
                         hotdog_log_snapshot = raw_orders
-                        print(
+                        _log_print(
                             f"  [{time.strftime('%H:%M:%S')}] "
                             f"[hotdog_summary] {hl.get('total_hotdogs', 0)} hotdog(s) captured",
                             flush=True,
                         )
                     else:
                         # Other JSON lines: print them so nothing is hidden
-                        print(f"  [JSON] {line_s}", flush=True)
+                        _log_print(f"  [JSON] {line_s}", flush=True)
 
                 except json.JSONDecodeError:
                     parsed_as_json = False
@@ -146,10 +158,10 @@ def main():
             # Non-JSON lines — print them directly so startup errors and
             # plain print() output are always visible
             if not parsed_as_json and line_s:
-                print(f"  {line_s}", flush=True)
+                _log_print(f"  {line_s}", flush=True)
 
     except KeyboardInterrupt:
-        print("\n[INFO] Interrupted by user — collecting hotdog log snapshot...")
+        _log_print("\n[INFO] Interrupted by user — collecting hotdog log snapshot...")
         process.terminate()
 
     process.wait()
@@ -317,25 +329,25 @@ def main():
     # ──────────────────────────────────────────────────────────────────────
     # Print plain-text report
     # ──────────────────────────────────────────────────────────────────────
-    print()
-    print("=" * 70)
-    print("  VIDEO SUMMARY & HOTDOG TIMELINE REPORT")
-    print("=" * 70)
-    print(f"  Video             : {os.path.basename(VIDEO_PATH)}")
-    print(f"  Run duration      : {full_summary['run_duration_s']}s")
-    print(f"  Metrics snapshots : {metrics_count}")
-    print(f"  Total orders      : {full_summary['total_orders_processed']}")
-    print(f"  Passed orders     : {full_summary['passed_orders']}")
-    print(f"  Failed orders     : {full_summary['failed_orders']}")
-    print(f"  Accuracy          : {full_summary['accuracy_pct']}%")
-    print()
-    print(f"  Total Hotdogs     : {full_summary['total_hotdogs']}")
-    print(f"  Completed/Wrapped : {full_summary['completed_hotdogs']}")
-    print()
+    _log_print()
+    _log_print("=" * 70)
+    _log_print("  VIDEO SUMMARY & HOTDOG TIMELINE REPORT")
+    _log_print("=" * 70)
+    _log_print(f"  Video             : {os.path.basename(VIDEO_PATH)}")
+    _log_print(f"  Run duration      : {full_summary['run_duration_s']}s")
+    _log_print(f"  Metrics snapshots : {metrics_count}")
+    _log_print(f"  Total orders      : {full_summary['total_orders_processed']}")
+    _log_print(f"  Passed orders     : {full_summary['passed_orders']}")
+    _log_print(f"  Failed orders     : {full_summary['failed_orders']}")
+    _log_print(f"  Accuracy          : {full_summary['accuracy_pct']}%")
+    _log_print()
+    _log_print(f"  Total Hotdogs     : {full_summary['total_hotdogs']}")
+    _log_print(f"  Completed/Wrapped : {full_summary['completed_hotdogs']}")
+    _log_print()
 
     if hotdogs_list:
-        print("  Hotdog Timeline & Ingredient Log:")
-        print("  " + "-" * 66)
+        _log_print("  Hotdog Timeline & Ingredient Log:")
+        _log_print("  " + "-" * 66)
         for h in hotdogs_list:
             hid = h.get("hotdog_id")
             st = h.get("status", "unknown").upper()
@@ -344,22 +356,25 @@ def main():
             dur = h.get("duration_s", 0.0)
             items = h.get("items_added", [])
             item_str = ", ".join(f"[{it.get('time_str')}] {it.get('item')}" for it in items) if items else "(none)"
-            print(f"  Hotdog #{hid} [{st}]: {start_str} -> {end_str} ({dur}s) | Items: {item_str}")
+            _log_print(f"  Hotdog #{hid} [{st}]: {start_str} -> {end_str} ({dur}s) | Items: {item_str}")
     else:
-        print("  (No hotdog item associations recorded)")
+        _log_print("  (No hotdog item associations recorded)")
 
-    print()
-    print("  Detections by class:")
+    _log_print()
+    _log_print("  Detections by class:")
     if total_detections_sum:
         for cls, cnt in sorted(total_detections_sum.items()):
-            print(f"    - {cls}: {cnt}")
+            _log_print(f"    - {cls}: {cnt}")
     else:
-        print("    (none — no metrics events received)")
+        _log_print("    (none — no metrics events received)")
 
-    print()
-    print(f"  Full JSON saved     -> {SUMMARY_PATH}")
-    print(f"  Timeline JSON saved -> {timeline_path}")
-    print("=" * 70)
+    _log_print()
+    _log_print(f"  Full JSON saved     -> {SUMMARY_PATH}")
+    _log_print(f"  Timeline JSON saved -> {timeline_path}")
+    _log_print(f"  Console log saved   -> {CONSOLE_LOG_PATH}")
+    _log_print("=" * 70)
+
+    console_file.close()
 
 
 if __name__ == "__main__":

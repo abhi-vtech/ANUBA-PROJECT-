@@ -29,10 +29,21 @@ class ZoneManager:
             )
 
     def get_zone_for_bbox(
-        self, bbox, frame_width: int = 1920, frame_height: int = 1080, is_hand: bool = True
+        self,
+        bbox,
+        frame_width: int = 1920,
+        frame_height: int = 1080,
+        is_hand: bool = True,
+        seg_polygon=None,
     ) -> Optional[Zone]:
         x1, y1, x2, y2 = bbox
-        if is_hand:
+
+        # Priority 1: segmentation polygon centroid (most accurate)
+        if seg_polygon is not None and len(seg_polygon) >= 3:
+            arr = np.array(seg_polygon, dtype=np.float32)
+            cx = float(arr[:, 0].mean())
+            cy = float(arr[:, 1].mean())
+        elif is_hand:
             # Use fingertip working point (75% down hand height) so fingertips dip into correct bin
             cx = (x1 + x2) // 2
             cy = int(y1 + (y2 - y1) * 0.75)

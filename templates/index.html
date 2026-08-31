@@ -919,6 +919,13 @@
             box-shadow: 0 0 8px rgba(239, 68, 68, 0.4);
         }
 
+        .cart-state-badge.state-DONE {
+            background: rgba(34, 197, 94, 0.2);
+            color: #22c55e;
+            border: 1px solid #22c55e;
+            box-shadow: 0 0 8px rgba(34, 197, 94, 0.4);
+        }
+
         .cart-container-info {
             display: flex;
             justify-content: space-between;
@@ -1084,6 +1091,19 @@
                 </div>
 
                 <div id="cart-counts-summary" style="display:flex; flex-wrap:wrap; gap:4px; margin-top:2px;"></div>
+            </div>
+
+            <!-- ════════════════════════════════════════════════════════
+                 HOTDOGS COMPLETED PANEL (LEFT SIDEBAR)
+            ════════════════════════════════════════════════════════ -->
+            <div class="sidebar-panel completed-hotdogs-panel" style="margin: 12px; margin-top: 8px;">
+                <div class="panel-title" style="display:flex; justify-content:space-between; align-items:center;">
+                    <span>🎓 Hotdogs Completed</span>
+                    <span class="badge" id="completed-count" style="background:#22c55e; color:#fff; font-size:11px; padding:2px 6px; border-radius:10px; font-weight:800;">0</span>
+                </div>
+                <div class="completed-list" id="completed-hotdogs-list" style="display:flex; flex-wrap:wrap; gap:6px; margin-top:8px;">
+                    <span style="color:#6b7280; font-size:11px; font-style:italic; width:100%; text-align:center; display:block;">No hotdogs completed yet</span>
+                </div>
             </div>
 
             <div class="sidebar-panel kds-panel">
@@ -1697,7 +1717,7 @@
                                    doneSet.has(String(rec.hotdog_id)) || 
                                    doneSet.has(Number(rec.hotdog_id)) ||
                                    doneSet.has(rec.numeric_tid);
-                const isActive   = rec.active && !isDone;
+                const isActive   = (rec.active || rec.is_coasting) && !isDone;
 
                 let statusCls, statusLabel, entryCls;
                 if (isDone) {
@@ -1854,6 +1874,25 @@
                 `).join('');
             } else {
                 countsContainer.innerHTML = '';
+            }
+
+            // 5. Completed Hotdogs Panel update
+            const completedList = document.getElementById('completed-hotdogs-list');
+            const completedCount = document.getElementById('completed-count');
+            const completedHotdogs = cart.completed_hotdogs || [];
+            if (completedCount) {
+                completedCount.textContent = completedHotdogs.length;
+            }
+            if (completedList) {
+                if (completedHotdogs.length === 0) {
+                    completedList.innerHTML = '<span style="color:#6b7280; font-size:11px; font-style:italic; width:100%; text-align:center; display:block; padding:4px 0;">No hotdogs completed yet</span>';
+                } else {
+                    completedList.innerHTML = completedHotdogs.map(id => `
+                        <div style="background:rgba(34, 197, 94, 0.15); border:1px solid rgba(34, 197, 94, 0.4); color:#4ade80; font-weight:800; font-size:11px; padding:3px 8px; border-radius:10px; display:inline-flex; align-items:center; gap:4px;">
+                            <span>🌭</span> <span>${id}</span>
+                        </div>
+                    `).join('');
+                }
             }
         }
 

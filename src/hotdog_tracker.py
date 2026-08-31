@@ -629,7 +629,19 @@ class HotdogTracker:
             del self._last_lost_by_hand[hid]
 
         # Extract hotdog and hand detections directly
-        hotdog_dets = [d for d in detections if d.class_name == "hot-dog"]
+        MIN_HOTDOG_POLY_AREA_PX = 1500.0
+        hotdog_dets = []
+        for d in detections:
+            if d.class_name == "hot-dog":
+                area = 0.0
+                if getattr(d, "polygon", None) and len(d.polygon) >= 3:
+                    pts = np.array(d.polygon, dtype=np.float32)
+                    area = cv2.contourArea(pts)
+                if area >= MIN_HOTDOG_POLY_AREA_PX:
+                    hotdog_dets.append(d)
+                else:
+                    logger.debug(f"[FILTER] Rejected hot-dog small chunk with polygon area {area:.1f}px (track_id {d.track_id})")
+
         hand_dets = [d for d in detections if d.class_name == "hand"]
 
         # Track hand identities across frames

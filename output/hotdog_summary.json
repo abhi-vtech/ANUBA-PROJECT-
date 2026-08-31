@@ -1,16 +1,261 @@
 {
   "video": "wienerschnitzel_10m.mkv",
-  "run_duration_s": 160.4,
-  "total_hotdogs": 0,
-  "completed_hotdogs": 0,
+  "run_duration_s": 135.3,
+  "total_hotdogs": 2,
+  "completed_hotdogs": 2,
   "in_progress_hotdogs": 0,
   "total_orders_processed": 0,
   "passed_orders": 0,
   "failed_orders": 0,
   "accuracy_pct": 0.0,
   "detections_by_class": {},
-  "hotdogs": [],
-  "item_timeline": [],
-  "orders": {},
-  "regression_metrics": {}
+  "hotdogs": [
+    {
+      "hotdog_id": "1",
+      "track_id": 1,
+      "order_id": "V1-05",
+      "status": "done",
+      "undergone_wrapping": true,
+      "start_time": {
+        "timestamp_s": 19.52,
+        "time_str": "00:00:19"
+      },
+      "end_time": {
+        "timestamp_s": 29.92,
+        "time_str": "00:00:29"
+      },
+      "wrapping": {
+        "undergone_wrapping": true,
+        "started_at_s": 28.32,
+        "started_at_str": "00:00:28",
+        "closing_at_s": 28.43,
+        "closing_at_str": "00:00:28",
+        "done_at_s": 29.92,
+        "done_at_str": "00:00:29"
+      },
+      "duration_s": 10.4,
+      "items_added": [
+        {
+          "hotdog_id": "1",
+          "item": "yellow_mustard_sauce",
+          "count": 1,
+          "timestamp_s": 21.49,
+          "time_str": "00:00:21",
+          "video_timestamp_s": 21.49
+        },
+        {
+          "hotdog_id": "1",
+          "item": "yellow_mustard_sauce",
+          "count": 2,
+          "timestamp_s": 22.22,
+          "time_str": "00:00:22",
+          "video_timestamp_s": 22.22
+        }
+      ],
+      "item_names": [
+        "yellow_mustard_sauce",
+        "yellow_mustard_sauce"
+      ],
+      "item_counts": {
+        "yellow_mustard_sauce": 2
+      },
+      "completed": true
+    },
+    {
+      "hotdog_id": "2",
+      "track_id": 2,
+      "order_id": "V1-05",
+      "status": "done",
+      "undergone_wrapping": true,
+      "start_time": {
+        "timestamp_s": 20.03,
+        "time_str": "00:00:20"
+      },
+      "end_time": {
+        "timestamp_s": 25.73,
+        "time_str": "00:00:25"
+      },
+      "wrapping": {
+        "undergone_wrapping": true,
+        "started_at_s": 22.93,
+        "started_at_str": "00:00:22",
+        "closing_at_s": 23.03,
+        "closing_at_str": "00:00:23",
+        "done_at_s": 25.73,
+        "done_at_str": "00:00:25"
+      },
+      "duration_s": 5.7,
+      "items_added": [
+        {
+          "hotdog_id": "2",
+          "item": "yellow_mustard_sauce",
+          "count": 1,
+          "timestamp_s": 20.5,
+          "time_str": "00:00:20",
+          "video_timestamp_s": 20.5
+        },
+        {
+          "hotdog_id": "2",
+          "item": "yellow_mustard_sauce",
+          "count": 2,
+          "timestamp_s": 21.43,
+          "time_str": "00:00:21",
+          "video_timestamp_s": 21.43
+        }
+      ],
+      "item_names": [
+        "yellow_mustard_sauce",
+        "yellow_mustard_sauce"
+      ],
+      "item_counts": {
+        "yellow_mustard_sauce": 2
+      },
+      "completed": true
+    }
+  ],
+  "item_timeline": [
+    {
+      "hotdog_id": "2",
+      "item": "yellow_mustard_sauce",
+      "count": 1,
+      "timestamp_s": 20.5,
+      "time_str": "00:00:20",
+      "video_timestamp_s": 20.5
+    },
+    {
+      "hotdog_id": "2",
+      "item": "yellow_mustard_sauce",
+      "count": 2,
+      "timestamp_s": 21.43,
+      "time_str": "00:00:21",
+      "video_timestamp_s": 21.43
+    },
+    {
+      "hotdog_id": "1",
+      "item": "yellow_mustard_sauce",
+      "count": 1,
+      "timestamp_s": 21.49,
+      "time_str": "00:00:21",
+      "video_timestamp_s": 21.49
+    },
+    {
+      "hotdog_id": "1",
+      "item": "yellow_mustard_sauce",
+      "count": 2,
+      "timestamp_s": 22.22,
+      "time_str": "00:00:22",
+      "video_timestamp_s": 22.22
+    }
+  ],
+  "orders": {
+    "order1": {
+      "hotdog_id": "1",
+      "track_id": 1,
+      "order_id": "V1-05",
+      "status": "done",
+      "undergone_wrapping": true,
+      "start_time": {
+        "timestamp_s": 19.52,
+        "time_str": "00:00:19"
+      },
+      "end_time": {
+        "timestamp_s": 29.92,
+        "time_str": "00:00:29"
+      },
+      "wrapping": {
+        "undergone_wrapping": true,
+        "started_at_s": 28.32,
+        "started_at_str": "00:00:28",
+        "closing_at_s": 28.43,
+        "closing_at_str": "00:00:28",
+        "done_at_s": 29.92,
+        "done_at_str": "00:00:29"
+      },
+      "duration_s": 10.4,
+      "items_added": [
+        {
+          "hotdog_id": "1",
+          "item": "yellow_mustard_sauce",
+          "count": 1,
+          "timestamp_s": 21.49,
+          "time_str": "00:00:21",
+          "video_timestamp_s": 21.49
+        },
+        {
+          "hotdog_id": "1",
+          "item": "yellow_mustard_sauce",
+          "count": 2,
+          "timestamp_s": 22.22,
+          "time_str": "00:00:22",
+          "video_timestamp_s": 22.22
+        }
+      ],
+      "item_names": [
+        "yellow_mustard_sauce",
+        "yellow_mustard_sauce"
+      ],
+      "item_counts": {
+        "yellow_mustard_sauce": 2
+      },
+      "completed": true
+    },
+    "order2": {
+      "hotdog_id": "2",
+      "track_id": 2,
+      "order_id": "V1-05",
+      "status": "done",
+      "undergone_wrapping": true,
+      "start_time": {
+        "timestamp_s": 20.03,
+        "time_str": "00:00:20"
+      },
+      "end_time": {
+        "timestamp_s": 25.73,
+        "time_str": "00:00:25"
+      },
+      "wrapping": {
+        "undergone_wrapping": true,
+        "started_at_s": 22.93,
+        "started_at_str": "00:00:22",
+        "closing_at_s": 23.03,
+        "closing_at_str": "00:00:23",
+        "done_at_s": 25.73,
+        "done_at_str": "00:00:25"
+      },
+      "duration_s": 5.7,
+      "items_added": [
+        {
+          "hotdog_id": "2",
+          "item": "yellow_mustard_sauce",
+          "count": 1,
+          "timestamp_s": 20.5,
+          "time_str": "00:00:20",
+          "video_timestamp_s": 20.5
+        },
+        {
+          "hotdog_id": "2",
+          "item": "yellow_mustard_sauce",
+          "count": 2,
+          "timestamp_s": 21.43,
+          "time_str": "00:00:21",
+          "video_timestamp_s": 21.43
+        }
+      ],
+      "item_names": [
+        "yellow_mustard_sauce",
+        "yellow_mustard_sauce"
+      ],
+      "item_counts": {
+        "yellow_mustard_sauce": 2
+      },
+      "completed": true
+    }
+  },
+  "regression_metrics": {
+    "occlusion_events": 13,
+    "occlusion_rematches": 11,
+    "neighbor_swaps": 0,
+    "id_recycled_after_exit": 0,
+    "wrap_zone_merges": 0
+  }
 }

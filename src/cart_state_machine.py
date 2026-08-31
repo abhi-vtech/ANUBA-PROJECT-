@@ -17,6 +17,7 @@ class CartState(str, Enum):
     BUILDING = "BUILDING"
     READY = "READY"
     RESET = "RESET"
+    DONE = "DONE"
 
 
 class EventType(str, Enum):
@@ -29,6 +30,8 @@ class EventType(str, Enum):
     FORCE_RESET = "FORCE_RESET"
     HOTDOG_DETECTED = "HOTDOG_DETECTED"
     ENTERED_ASSEMBLY = "ENTERED_ASSEMBLY"
+    HOTDOG_EXITED = "HOTDOG_EXITED"
+    NO_HOTDOGS = "NO_HOTDOGS"
 
 
 @dataclass
@@ -120,19 +123,29 @@ class CartStateMachine:
             self._handle_container_removed(reason=f"Exit logic confirmed ({event.roi_id or 'Exit_Line'})")
             return self.state
 
+        if event.event_type == EventType.NO_HOTDOGS:
+            self._set_state(CartState.EMPTY, reason="No active hotdogs remaining on screen")
+            self.ingredients.clear()
+            self.container_id = None
+            return self.state
+
+        if event.event_type == EventType.HOTDOG_EXITED:
+            self._set_state(CartState.DONE, reason="Hotdog wrapped and exited")
+            return self.state
+
         # 2. Automated feed / assembly ROI state transitions
         if event.event_type == EventType.HOTDOG_DETECTED:
-            if self.state == CartState.EMPTY:
+            if self.state in (CartState.EMPTY, CartState.DONE):
                 self._set_state(CartState.READY, reason="Hotdog detected in video feed")
             return self.state
 
         if event.event_type == EventType.ENTERED_ASSEMBLY:
-            if self.state in (CartState.EMPTY, CartState.READY):
+            if self.state in (CartState.EMPTY, CartState.READY, CartState.DONE):
                 self._set_state(CartState.BUILDING, reason="Hotdog entered assembly ROI")
             return self.state
 
         # 3. State-specific ingredient handling
-        if self.state in (CartState.EMPTY, CartState.READY):
+        if self.state in (CartState.EMPTY, CartState.READY, CartState.DONE):
             if event.event_type == EventType.CONTAINER_PLACED:
                 self._set_state(CartState.EMPTY, reason=f"Container {event.container_id} placed in ROI")
             elif event.event_type == EventType.INGREDIENT_ADDED and event.ingredient_name:

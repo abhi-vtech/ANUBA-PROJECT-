@@ -53,6 +53,16 @@ _wrapping_done_ids: list = []   # track_ids permanently wrapped (DONE state)
 _fps: float = 0.0
 _last_frame_time: float = 0.0
 _frame_lock = asyncio.Lock()
+_exited_hotdogs: list = []
+
+
+def record_hotdog_exit(exited_ids: list):
+    global _exited_hotdogs
+    for eid in exited_ids:
+        # Format track ID to match #ID format if numeric
+        formatted_id = f"#{eid}" if isinstance(eid, (int, float)) or (isinstance(eid, str) and eid.isdigit()) else str(eid)
+        if formatted_id not in _exited_hotdogs:
+            _exited_hotdogs.append(formatted_id)
 
 
 # Default color palette for zones (used when color not specified in config)
@@ -178,7 +188,11 @@ def add_event(
                 confidence=0.95,
             )
         )
-    elif event_type in ("container_removed", "reset", "hotdog_exited"):
+    elif event_type == "hotdog_exited":
+        cart_machine.process_event(
+            CartEvent(event_type=EventType.HOTDOG_EXITED, roi_id=zone or "Exit_Line_ROI")
+        )
+    elif event_type in ("container_removed", "reset"):
         cart_machine.process_event(
             CartEvent(event_type=EventType.CONTAINER_REMOVED, roi_id=zone or "ROI_Assembly")
         )
@@ -219,6 +233,7 @@ def get_cart_data() -> dict:
         "active_hotdog_id": active_hotdog_id,
         "ingredients": items_list,
         "counts": counts,
+        "completed_hotdogs": _exited_hotdogs,
         "ingredient_details": [
             {
                 "name": ing.name,
@@ -267,6 +282,8 @@ async def api_cart():
 @app.post("/api/cart/reset")
 async def api_cart_reset():
     """Trigger cart reset mechanism (tied to tray removal)."""
+    global _exited_hotdogs
+    _exited_hotdogs.clear()
     cart_machine.process_event(CartEvent(event_type=EventType.CONTAINER_REMOVED, roi_id="ROI_Assembly"))
     return {"status": "success", "cart": get_cart_data()}
 
