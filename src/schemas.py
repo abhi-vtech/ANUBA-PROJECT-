@@ -70,17 +70,40 @@ class Action:
 
 
 @dataclass
+class LineItem:
+    variant: str
+    count: int
+    items: Dict[str, int]
+
+
+@dataclass
 class Ticket:
     ticket_id: str
-    expected_items: List[str]
+    shortcut: str = ""
+    total_hotdogs: int = 1
+    line_items: List[LineItem] = field(default_factory=list)
+    hotdog_specs: Dict[str, Dict[str, int]] = field(default_factory=dict)
+    expected_items: List[str] = field(default_factory=list)
+    # True when hotdog_specs already expands every hotdog in line_items, so the
+    # two describe the same order and counting both double-counts it.  KDS
+    # tickets set this; mock tickets carry specs only and leave it False.
+    specs_cover_line_items: bool = False
+
 
 
 @dataclass
 class Order:
     ticket_id: str
+    shortcut: str = ""
     expected_items: List[str] = field(default_factory=list)
     remaining_counts: Dict[str, int] = field(default_factory=dict)
     picked_counts: Dict[str, int] = field(default_factory=dict)
+    # What the ticket asks for, fixed at the requirement and never decremented.
+    # remaining_counts cannot serve this purpose: picked_counts is incremented
+    # from five different code paths and only one of them decrements remaining,
+    # so "picked + remaining" grows as the order is made.
+    required_counts: Dict[str, int] = field(default_factory=dict)
+    hotdog_count: int = 1
     passed: bool = False
     missing_items: List[str] = field(default_factory=list)
     extra_items: List[str] = field(default_factory=list)
@@ -89,6 +112,7 @@ class Order:
     wrong_items: List[str] = field(default_factory=list)
     validation_message: str = ""
     added_items_details: List[dict] = field(default_factory=list)
+    dashboard_slots: List[dict] = field(default_factory=list)
     ending_soon: bool = False
 
 

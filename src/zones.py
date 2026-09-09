@@ -59,7 +59,13 @@ class ZoneManager:
         # intended for the immediately adjacent zone_02 / grated-yellow-cheese).
         for zone in self.zones:
             poly = np.array(zone.polygon, dtype=np.float32)
-            if cv2.pointPolygonTest(poly, (nx, ny), False) >= 0:
+            dist = cv2.pointPolygonTest(poly, (nx, ny), True)
+            if dist >= 0:
+                if zone.name == "onions":
+                    if ny < 0.373:
+                        relish_zone = next((z for z in self.zones if z.name == "relish"), None)
+                        if relish_zone:
+                            return relish_zone
                 return zone
 
         # Pass 2: small-tolerance fallback (0.01 normalised units) for cases
@@ -68,7 +74,13 @@ class ZoneManager:
         # larger value (the old 0.05) caused the wrong bin to match.
         for zone in self.zones:
             poly = np.array(zone.polygon, dtype=np.float32)
-            if cv2.pointPolygonTest(poly, (nx, ny), True) >= -0.01:
+            dist = cv2.pointPolygonTest(poly, (nx, ny), True)
+            if dist >= -0.01:
+                if zone.name == "onions":
+                    if ny < 0.373:
+                        relish_zone = next((z for z in self.zones if z.name == "relish"), None)
+                        if relish_zone:
+                            return relish_zone
                 return zone
 
         return None

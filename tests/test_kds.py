@@ -539,5 +539,34 @@ class TestOrderStateMachine:
         assert len(order.missing_items) == 0
         assert len(order.wrong_items) == 0
 
+    def test_per_hotdog_kds_ticket(self):
+        """Test KDS ticket with per-hotdog item specifications (hotdog1, hotdog2)."""
+        ticket = Ticket(
+            ticket_id="T_BATCH_1",
+            hotdog_specs={
+                "hotdog1": {"chilli": 1, "yellow_mustard_sauce": 1},
+                "hotdog2": {"grated_yellow_cheese": 1},
+            }
+        )
+        sm = self._make_sm()
+        sm.on_kds_ticket(ticket)
+        order = sm.get_current_order()
+        
+        # Check overall aggregate required items and hotdog count
+        assert order.remaining_counts.get("chilli") == 1
+        assert order.remaining_counts.get("yellow_mustard_sauce") == 1
+        assert order.remaining_counts.get("grated_yellow_cheese") == 1
+        assert order.hotdog_count == 2
+
+
+        # Simulate placing all required items
+        sm.on_action(Action(track_id=1, zone_id="c", zone_name="chilli", action_type="place", timestamp=1.0))
+        sm.on_action(Action(track_id=1, zone_id="m", zone_name="yellow_mustard_sauce", action_type="place", timestamp=2.0))
+        sm.on_action(Action(track_id=2, zone_id="g", zone_name="grated_yellow_cheese", action_type="place", timestamp=3.0))
+
+        res = sm.finalize_current_order()
+        assert res.passed is True
+
+
 
 

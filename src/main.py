@@ -1,7 +1,9 @@
 import json
 import logging
 import os
+import socket
 import threading
+import shutil
 import time
 from pathlib import Path
 
@@ -11,12 +13,13 @@ import uvicorn
 import yaml
 
 from src.capture import VideoCaptureThread
+from src import dashboard
 from src.dashboard import add_event, app, update_frame_data, cart_machine
 from src.detector import Detector
 from src.flow import OpticalFlowAnalyzer
 from src.kds_client import DynamicKDSClient, MockKDSClient
 from src.paths import resource
-from src.schemas import HAND_CLASS, SAUCE_CLASSES, Action, Detection
+from src.schemas import HAND_CLASS, SAUCE_CLASSES, Action, Detection, OrderStatus
 from src.state_machine import OrderStateMachine
 from src.hotdog_tracker import (
     HotdogTracker,
@@ -95,12 +98,22 @@ def _poly_or_box_overlap(det_a, det_b) -> bool:
 
 # Per-class bounding box colors (BGR)
 CLASS_COLORS = {
-    "hand": (0, 255, 0),
-    "hot-dog": (0, 165, 255),
-    "ketchup_sauce": (0, 0, 255),
-    "yellow_mustard_sauce": (0, 255, 255),
-    "burger_bun": (255, 200, 0),
-    "french_fries": (255, 255, 0),
+    "hand": (0, 255, 0),                 # Green
+    "hot-dog": (0, 165, 255),            # Orange
+    "ketchup_sauce": (0, 0, 255),        # Red
+    "yellow_mustard_sauce": (0, 255, 255), # Yellow
+    "burger_bun": (255, 200, 0),         # Light Blue
+    "french_fries": (255, 255, 0),       # Cyan
+    "diced_onions": (255, 255, 255),     # White
+    "grated_yellow_cheese": (0, 200, 255), # Gold
+    "pickle_spears": (0, 128, 0),        # Dark Green
+    "pickle_rounds": (144, 238, 144),    # Light Green
+    "sport_peppers": (0, 255, 127),      # Spring Green
+    "chilli": (0, 69, 139),              # Dark Brown/Red
+    "tomato": (71, 99, 255),             # Tomato Red
+    "relish": (0, 100, 0),               # Deep Green
+    "knife": (192, 192, 192),            # Silver/Gray
+    "wrapping": (200, 200, 200),         # Light Gray
 }
 DEFAULT_BBOX_COLOR = (0, 255, 255)
 
@@ -307,26 +320,7 @@ def _draw_dashed_rect(img, pt1, pt2, color, thickness=1, style='dotted'):
 def draw_annotations(frame, detections, zones, current_order):
     h, w = frame.shape[:2]
     
-    # ── Draw System ROI ────────────────────────────────────────────────────────
-    import os, json
-    from src.paths import resource
-    if not hasattr(draw_annotations, "_system_roi"):
-        roi_path = resource("config/system_roi.json")
-        draw_annotations._system_roi = None
-        if os.path.exists(roi_path):
-            try:
-                with open(roi_path, 'r') as f:
-                    draw_annotations._system_roi = json.load(f)
-            except Exception:
-                pass
-                
-    if draw_annotations._system_roi:
-        roi = draw_annotations._system_roi
-        rx, ry, rw, rh = roi.get('x', 0), roi.get('y', 0), roi.get('w', 0), roi.get('h', 0)
-        if rw > 0 and rh > 0:
-            cv2.rectangle(frame, (rx, ry), (rx + rw, ry + rh), (255, 0, 255), 3, cv2.LINE_AA)
-            cv2.putText(frame, "Active ROI", (rx, max(0, ry - 10)), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 0, 255), 2)
-    # ───────────────────────────────────────────────────────────────────────────
+    # (System ROI drawing removed per user request)───────────────────────────────────────────────────────────────────────
     
     for zone in zones.get_all():
         poly = [(int(p[0] * w), int(p[1] * h)) for p in zone.polygon]
@@ -355,48 +349,6 @@ def draw_annotations(frame, detections, zones, current_order):
             )
             cv2.putText(frame, line, (lx, ly), font, scale, color, thickness)
 
-    # ── Draw standalone track trails (pure YOLO track_id w/ continuity, no Re-ID) ──
-    current_time = getattr(draw_annotations, "_current_video_time", _time_module.time())
-    done_ids = getattr(draw_annotations, "_done_ids", set())
-    detector_id_map = getattr(draw_annotations, "_detector_id_map", {})
-
-    _update_trail_buffer(detections, current_time)
-
-    for ckey, buf in list(_TRAIL_BUFFER.items()):
-        if done_ids and (ckey in done_ids or detector_id_map.get(ckey) in done_ids):
-            continue
-        pts = list(buf)
-        if len(pts) < 2:
-            continue
-        base_color = _get_track_color(ckey)
-        last_seen = _TRAIL_LAST_SEEN.get(ckey, current_time)
-        time_since = max(0.0, current_time - last_seen)
-
-        # 100% solid while active; fade to 0.0 over 10s after disappearance
-        alpha = max(0.0, 1.0 - (time_since / _TRAIL_FADE_S))
-        if alpha < 0.02:
-            continue
-
-        for i in range(1, len(pts)):
-            pt1 = (int(pts[i - 1]["x"]), int(pts[i - 1]["y"]))
-            pt2 = (int(pts[i]["x"]), int(pts[i]["y"]))
-            seg_color = (
-                int(base_color[0] * alpha),
-                int(base_color[1] * alpha),
-                int(base_color[2] * alpha),
-            )
-            cv2.line(frame, pt1, pt2, seg_color, 2, cv2.LINE_AA)
-
-        # Head dot at latest position
-        lx, ly = int(pts[-1]["x"]), int(pts[-1]["y"])
-        dot_color = (
-            int(base_color[0] * alpha),
-            int(base_color[1] * alpha),
-            int(base_color[2] * alpha),
-        )
-        cv2.circle(frame, (lx, ly), 5, dot_color, -1, cv2.LINE_AA)
-        cv2.circle(frame, (lx, ly), 7, (255, 255, 255), 1, cv2.LINE_AA)
-
     hotdog_log = getattr(draw_annotations, "_hotdog_log_ref", {})
 
     for det in detections:
@@ -406,61 +358,7 @@ def draw_annotations(frame, detections, zones, current_order):
         has_poly = poly is not None and len(poly) >= 3
 
         if det.class_name in ("hot-dog", "wrapped"):
-            # Match record in hotdog_log to find monotonic hotdog_id
-            matched_rec = None
-            raw_tid = getattr(det, "track_id", None)
-
-            # 1. Primary: Look up monotonic ID via detector_id_map
-            if raw_tid is not None and raw_tid in detector_id_map:
-                mono_id = detector_id_map[raw_tid]
-                if mono_id in hotdog_log:
-                    matched_rec = hotdog_log[mono_id]
-
-            # 2. Secondary: Match by spatial proximity & bounding box IoU with active records in hotdog_log
-            if matched_rec is None:
-                det_cx = (x1 + x2) / 2.0
-                det_cy = (y1 + y2) / 2.0
-                best_score = float("inf")
-                for rec in hotdog_log.values():
-                    if rec.get("retired") or rec.get("active") is False:
-                        if det.class_name != "wrapped":
-                            # Only allow 'wrapped' class to match retired hotdog records
-                            continue
-                    rx1, ry1, rx2, ry2 = rec.get("bbox", (0, 0, 0, 0))
-                    rcx = (rx1 + rx2) / 2.0
-                    rcy = (ry1 + ry2) / 2.0
-                    dist = ((det_cx - rcx) ** 2 + (det_cy - rcy) ** 2) ** 0.5
-                    # Compute IoU
-                    inter = max(0, min(x2, rx2) - max(x1, rx1)) * max(0, min(y2, ry2) - max(y1, ry1))
-                    union = (x2 - x1) * (y2 - y1) + (rx2 - rx1) * (ry2 - ry1) - inter
-                    iou = inter / union if union > 0 else 0.0
-
-                    if iou >= 0.15 or dist <= 200.0:
-                        score = (1.0 - iou) * 100.0 + dist
-                        if score < best_score:
-                            best_score = score
-                            matched_rec = rec
-
-            # 3. Tertiary fallback: if raw_tid in hotdog_log and not remapped to something else
-            if matched_rec is None and raw_tid is not None and raw_tid in hotdog_log:
-                if not any(mono == raw_tid for mono in detector_id_map.values() if mono != raw_tid):
-                    matched_rec = hotdog_log[raw_tid]
-
-            inferred = False
-            if matched_rec:
-                hid = matched_rec.get("hotdog_id")
-                inferred = matched_rec.get("inferred_position", False)
-            elif raw_tid is not None and raw_tid in detector_id_map:
-                hid = str(detector_id_map[raw_tid])
-            elif raw_tid not in (-1, None, "?"):
-                hid = str(raw_tid)
-            else:
-                hid = "1"
-
-            if os.environ.get("MULTI_ID", "false").lower() not in ("1", "true", "yes"):
-                hid = "1"
-            
-            label_text = f"#{hid}"
+            label_text = "Hotdog"
 
             # ── Draw filled segmentation mask + orange contour (no bounding box) ──
             seg_color   = (0, 140, 255)   # Vibrant orange (BGR)
@@ -528,45 +426,7 @@ def draw_annotations(frame, detections, zones, current_order):
         cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
         cv2.circle(frame, (cx, cy), 5, color, -1)
 
-    # ── Bottom status bar for added ingredients ────────────────────────────
-    # User requirement: remove overlays like chilli 1x on screen, make them in down like id one is added
-    active_hotdog_items = []
-    if hotdog_log:
-        for tid, rec in hotdog_log.items():
-            if rec.get("retired") and rec.get("status") == "done":
-                continue
-            hid = rec.get("hotdog_id", str(tid))
-            items = rec.get("item_names", [])
-            if items:
-                items_str = ", ".join(name.replace("_", " ") for name in items)
-                active_hotdog_items.append(f"ID #{hid}: {items_str} added")
-
-    if active_hotdog_items:
-        bar_text = "   |   ".join(active_hotdog_items)
-        font = cv2.FONT_HERSHEY_SIMPLEX
-        font_scale = 0.52
-        thickness = 1
-        (tw, th), _ = cv2.getTextSize(bar_text, font, font_scale, thickness)
-
-        # Draw sleek semi-transparent dark bar at the bottom
-        overlay = frame.copy()
-        bar_h = 36
-        cv2.rectangle(overlay, (0, h - bar_h), (w, h), (18, 18, 18), -1)
-        cv2.addWeighted(overlay, 0.75, frame, 0.25, 0, frame)
-
-        # Green indicator dot
-        cv2.circle(frame, (20, h - bar_h // 2), 5, (16, 185, 129), -1)
-        cv2.putText(
-            frame,
-            bar_text,
-            (36, h - bar_h // 2 + 5),
-            font,
-            font_scale,
-            (240, 240, 240),
-            thickness,
-            cv2.LINE_AA,
-        )
-
+    # Removed bottom status bar for added ingredients as requested
     return frame
 
 
@@ -606,8 +466,8 @@ def _draw_exit_line_overlays(
     # Monotonic mapping
     wrapped_mono_ids = []
     for wid in wrapped_ids:
-        _mono = hotdog_tracker._detector_id_map.get(wid, wid)
-        if _mono not in wrapped_mono_ids:
+        _mono = hotdog_tracker._detector_id_map.get(wid)
+        if _mono is not None and _mono not in wrapped_mono_ids:
             wrapped_mono_ids.append(_mono)
 
     evt = _main_exit_detector.check_crossing(
@@ -629,83 +489,45 @@ def _draw_exit_line_overlays(
 # ── Wrapping-state on-screen overlays (additive — do not remove) ───────────────
 from src.wrapping_state import STATE_CLOSING, STATE_DONE  # noqa: E402
 
-def _draw_wrapping_overlays(
-    frame: np.ndarray,
-    frame_idx: int,
-    current_detections: list,
-    wrapping_sm,
-    done_linger_frames: int = 90,   # show DONE banner for ~3 s at 30 fps
-) -> None:
+
+
+
+
+def _infer_hotdog_item(kds_video, hotdog_tracker, mono_id):
+    """Infer which menu item a finished hotdog track represents.
+
+    The detection model has a single ``hot-dog`` class -- there is no
+    per-variant class and no chili/cheese/onion classes -- so the physical type
+    can only be inferred from the ingredients the zone/``TemporalTracker``
+    pipeline attributed to this track.  We pick the configured shortcut whose
+    ingredient set best matches, and fall back to the bare detection class when
+    nothing matches, rather than guessing a variant.
+
+    Returning ``"hot-dog"`` still counts towards the order's quantity; it just
+    carries no type claim.  See ``TicketManager.validate``.
     """
-    Draw wrapping-state banners on the already-annotated frame.
-    Called AFTER draw_annotations() — purely additive, touches no existing drawing.
+    try:
+        record = hotdog_tracker._records.get(mono_id)
+        if record is None:
+            record = hotdog_tracker._retired_records.get(mono_id)
+        observed = {str(n).strip().lower() for n in (record.item_names if record else [])}
+    except Exception:
+        observed = set()
+    if not observed:
+        return "hot-dog"
 
-    CLOSING hotdog (still visible): amber "About to Complete" banner below its bbox.
-    DONE hotdog (just disappeared): green "Order Done" banner at last known bbox
-                                     shown for done_linger_frames frames then fades.
-    """
-    w_states = wrapping_sm.get_all_states()
-    font = cv2.FONT_HERSHEY_SIMPLEX
-
-    # Build map: raw track_id -> current bbox (hotdogs visible this frame)
-    tid_to_bbox = {
-        det.track_id: det.bbox
-        for det in current_detections
-        if det.class_name == "hot-dog"
-        and getattr(det, "track_id", -1) is not None
-        and getattr(det, "track_id", -1) >= 0
-    }
-
-    for tid, info in w_states.items():
-        state     = info["state"]
-        last_bbox = info.get("last_bbox")
-
-        # ── CLOSING: hotdog is still visible, wrapping present for >= 3 s ─────
-        if state == STATE_CLOSING:
-            bbox = tid_to_bbox.get(tid, last_bbox)
-            if bbox is None:
-                continue
-            x1, y1, x2, y2 = bbox
-            label  = "About to Complete"
-            txt_color = (255, 255, 255)
-            bg_color  = (0, 100, 220)     # deep amber-blue
-            bdr_color = (0, 180, 255)     # bright orange
-
-            (lw, lh), _ = cv2.getTextSize(label, font, 0.58, 2)
-            bx1, by1 = x1, y2 + 4
-            bx2, by2 = x1 + lw + 14, y2 + lh + 18
-            cv2.rectangle(frame, (bx1, by1), (bx2, by2), bg_color, -1)
-            cv2.rectangle(frame, (bx1, by1), (bx2, by2), bdr_color, 2)
-            cv2.putText(frame, label, (bx1 + 7, by2 - 6), font, 0.58, txt_color, 2, cv2.LINE_AA)
-
-        # ── DONE: hotdog gone — draw fading banner at last known position ──────
-        elif state == STATE_DONE:
-            if last_bbox is None:
-                continue
-            done_frame = info.get("done_frame")
-            if done_frame is None:
-                continue
-            elapsed_frames = frame_idx - done_frame
-            if elapsed_frames > done_linger_frames:
-                continue
-            # Fade from 1.0 to 0.0 over the linger window
-            alpha = max(0.1, 1.0 - elapsed_frames / done_linger_frames)
-
-            x1, y1, x2, y2 = last_bbox
-            label  = "Order Done!"
-            bg_color  = (20, 130, 20)     # dark green
-            bdr_color = (50, 230, 50)     # bright green
-            txt_color = (255, 255, 255)
-
-            (lw, lh), _ = cv2.getTextSize(label, font, 0.65, 2)
-            cy = (y1 + y2) // 2
-
-            overlay = frame.copy()
-            cv2.rectangle(overlay, (x1, y1), (x2, y2), bdr_color, 3)
-            cv2.rectangle(overlay, (x1, cy - lh - 8), (x1 + lw + 14, cy + 10), bg_color, -1)
-            cv2.putText(overlay, label, (x1 + 7, cy + 4), font, 0.65, txt_color, 2, cv2.LINE_AA)
-            cv2.addWeighted(overlay, alpha, frame, 1.0 - alpha, 0, frame)
-
+    mapper = kds_video.monitor.mapper
+    best_item, best_score = None, 0.0
+    for definition in mapper.shortcuts.values():
+        expected = {i.strip().lower() for i in definition.ingredients}
+        if not expected:
+            continue
+        # Jaccard: rewards matching the recipe without rewarding extra noise.
+        score = len(expected & observed) / float(len(expected | observed))
+        if score > best_score:
+            best_score, best_item = score, definition.item
+    # Require a real majority overlap before claiming a type at all.
+    return best_item if best_item and best_score >= 0.5 else "hot-dog"
 
 
 def _env(key, default=None, cast=None):
@@ -781,6 +603,45 @@ def main():
         )
     )
 
+    # ── Dashboard first ────────────────────────────────────────────────────
+    # Started BEFORE the model loads.  Loading the weights takes several
+    # seconds, and while it ran there was no server at all, so the browser
+    # sat on a connection error that looks identical to a broken dashboard.
+    # Binding first means the page is up immediately and can say what it is
+    # waiting for.  Every endpoint already tolerates the pipeline objects
+    # not existing yet.
+    dashboard_port = int(_env("DASHBOARD_PORT", 8000))
+
+    # Fail loudly if the port is taken.  uvicorn only *logs* a bind error and
+    # the pipeline would carry on processing video with no dashboard, while the
+    # browser keeps showing the stale page served by the older process -- which
+    # looks exactly like a broken feed rather than a second instance.
+    _probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        _probe.bind(("0.0.0.0", dashboard_port))
+    except OSError:
+        raise SystemExit(
+            "Dashboard port %d is already in use.\n"
+            "Another run of this pipeline is probably still going: whatever you\n"
+            "see at http://localhost:%d would be that older process, not this one.\n"
+            "Stop it first, or start this one with DASHBOARD_PORT=<other port>."
+            % (dashboard_port, dashboard_port)
+        )
+    finally:
+        _probe.close()
+
+    dashboard_thread = threading.Thread(
+        target=lambda: uvicorn.run(
+            app, host="0.0.0.0", port=dashboard_port, log_level="warning"
+        ),
+        daemon=True,
+    )
+    dashboard_thread.start()
+    # Give uvicorn time to bind and start serving before we process video frames.
+    # Without this pause the entire short video can finish before the server is ready.
+    time.sleep(2.0)
+    logger.info("Dashboard serving on http://localhost:%d", dashboard_port)
+
     detector = Detector(
         model_path,
         secondary_model_path=config.get("secondary_model_path"),
@@ -801,6 +662,7 @@ def main():
                 "HOTDOG_CONF_THRESHOLD",
                 config.get("hotdog_conf_threshold", 0.10),
             )),
+            "knife": 0.80,
         },
     )
     zones = ZoneManager(resource("config/zones.json"))
@@ -917,7 +779,68 @@ def main():
         base_hand_displacement_px=_wrap_hand_disp,
     )
 
-    if kds_mode == "dynamic":
+    # kds_video_client is imported lazily: the KDS reader pulls in OCR
+    # dependencies that the production-only pipeline must not require.
+    kds_video = None
+    failure_recorder = None
+    compose_dashboard_frame = None
+    # Tickets created but whose clip has not started yet (it starts on the next
+    # frame, when there is a composed dashboard image to write).
+    _pending_recordings = set()
+    if kds_mode == "video":
+        from src.kds.kds_video_client import KDSVideoClient
+
+        kds_source = os.getenv("KDS_SOURCE") or config.get("kds_source")
+        if not kds_source:
+            raise SystemExit(
+                "kds_mode is 'video' but no KDS source was given. "
+                "Set KDS_SOURCE=<path-or-rtsp> or kds_source: in config/model.yaml"
+            )
+        kds_video = KDSVideoClient(
+            kds_source,
+            timeline_path=config.get("kds_timeline", "output/kds_timeline.jsonl"),
+            realtime=realtime,
+        )
+        kds = kds_video
+        # Pin the reader at the start of its video until the production loop
+        # publishes a real time.  The reader is already running while the model
+        # loads, and with no master clock set it would free-run through those
+        # seconds and start the run already ahead.
+        # `capture` does not exist yet here, so test the source the same way
+        # VideoCaptureThread does.
+        if isinstance(source, str) and Path(source).is_file():
+            kds_video.set_master_time(0.0)
+        logger.info("KDS video reader active on %s", kds_source)
+
+        # Record the dashboard view for every ticket; keep only the failures.
+        from src.kds.failure_recorder import FailureRecorder, compose_dashboard_frame
+
+        failure_recorder = FailureRecorder(
+            output_dir=config.get("failure_clip_dir", "output/failures"),
+            fps=float(config.get("failure_clip_fps", 10.0)),
+            max_seconds=float(config.get("failure_clip_max_s", 900.0)),
+            enabled=str(
+                _env("RECORD_FAILURES", config.get("record_failures", True))
+            ).lower() not in ("false", "0", "no"),
+        )
+
+        def _on_kds_group_event(kind, payload):
+            """Start a clip when a ticket is created, resolve it on the verdict."""
+            ticket_id = payload.get("ticket_id", "")
+            if kind == "created":
+                _pending_recordings.add(ticket_id)
+            elif kind == "finalized":
+                _pending_recordings.discard(ticket_id)
+                result = payload.get("result") or {}
+                failure_recorder.finish(
+                    ticket_id,
+                    correct=bool(payload.get("correct")),
+                    detail=result.get("message", ""),
+                    result=result,
+                )
+
+        kds_video.add_listener(_on_kds_group_event)
+    elif kds_mode == "dynamic":
         zone_names = [z.name for z in zones.get_all() if z.zone_type == "bin"]
         kds = DynamicKDSClient(
             zone_names=zone_names,
@@ -931,8 +854,27 @@ def main():
         kds = MockKDSClient(
             resource("config/kds_mock.json"), poll_interval=config.get("kds_poll", 2), loop=True
         )
+    history_path = config.get("kds_history")
+
+    # A fresh run starts with an empty board.  Order history is rehydrated from
+    # this file at construction, so without archiving it first the dashboard
+    # opens showing the previous run's completed orders, its stats and its
+    # checklist -- which reads as though this run had already done the work.
+    if _env("FRESH_START", "0") == "1" and history_path:
+        _hist = Path(history_path)
+        if _hist.exists() and _hist.stat().st_size > 0:
+            _archive = _hist.parent / "history"
+            _archive.mkdir(parents=True, exist_ok=True)
+            _stamp = time.strftime("%Y%m%d_%H%M%S")
+            _moved = _archive / ("%s_%s%s" % (_hist.stem, _stamp, _hist.suffix))
+            try:
+                shutil.move(str(_hist), str(_moved))
+                logger.info("Fresh start: previous history archived to %s", _moved)
+            except OSError as exc:
+                logger.warning("Could not archive %s: %s", _hist, exc)
+
     state_machine = OrderStateMachine(
-        history_path=config.get("kds_history"),
+        history_path=history_path,
     )
     state_machine.set_kds_client(kds)
 
@@ -956,11 +898,6 @@ def main():
 
     dashboard.state_machine = state_machine
 
-    dashboard_thread = threading.Thread(
-        target=lambda: uvicorn.run(app, host="0.0.0.0", port=8000, log_level="warning"),
-        daemon=True,
-    )
-    dashboard_thread.start()
 
     prev_gray = None
     frame_count = 0
@@ -980,6 +917,18 @@ def main():
         min_coverage_ratio=float(_env("WRAPPING_MIN_COVERAGE_RATIO", config.get("wrapping_min_coverage_ratio", 0.25))),
     )
     SAUCE_MIN_FRAMES = 1     # 1 frame accumulation for responsive detection
+    
+    kds_image_cache = {}
+
+    # Idle-mode tuning: how often to still run YOLO while the KDS is empty.
+    # 1 (the default) disables idling altogether -- detection runs on every
+    # frame whatever the KDS screen shows.  Set >1 to run 1 frame in N while
+    # the screen is blank, or 0 to stop detection completely while it is.
+    idle_detect_stride = int(_env("IDLE_DETECT_STRIDE", config.get("idle_detect_stride", 1)))
+    idle_enabled = idle_detect_stride != 1
+    _idle_state = False
+    _idle_frames = 0
+    _idle_t0 = 0.0          # start of the current idle stretch, for the heartbeat
 
     try:
         while True:
@@ -990,11 +939,37 @@ def main():
                 if ticket:
                     state_machine.on_kds_ticket(ticket)
 
+            # A ticket can change on the KDS after it enters the system.  Apply
+            # those changes to the order already in flight, keeping whatever it
+            # has accumulated -- otherwise the checklist shows the first reading
+            # for the rest of the order's life.
+            if kds_video is not None:
+                for updated in kds_video.get_ticket_updates():
+                    if state_machine.update_kds_ticket(updated):
+                        logger.info(
+                            "Order %s requirements updated from the KDS",
+                            updated.ticket_id,
+                        )
+
             frame_item = capture.get_frame()
             if frame_item is None:
+                # Check if the video just looped (marker was received inside get_frame)
+                if capture.consume_loop():
+                    temporal.reset()
+                    prev_gray = None
+                    if state_machine.current_ticket is not None:
+                        state_machine.finalize_current_order()
+                    if capture._is_file_source:
+                        logger.info("Video ended. Exiting.")
+                        break
                 time.sleep(0.01)
                 continue
             frame, current_time = frame_item
+
+            # Keep the KDS reader in step with this video.  It reads far faster
+            # than the detector runs, so without this it drifts minutes ahead.
+            if kds_video is not None:
+                kds_video.set_master_time(current_time)
 
             # Force finished status 3.5 seconds before the video ends
             if capture._is_file_source:
@@ -1008,29 +983,80 @@ def main():
                             state_machine.current_order.passed = True
                             state_machine.current_order.ending_soon = True
 
-            if capture.consume_loop():
-                temporal.reset()
-                prev_gray = None
-                if state_machine.current_ticket is not None:
-                    state_machine.finalize_current_order()
-                # Clear sauce frame counters on video change
-                _sauce_frames.clear()
-                _sauce_applied.clear()
-                _sauce_last_fired.clear()
-
-                # ── EXIT_ON_END: stop after the video finishes ────────────
-                if exit_on_end:
-                    print(f"[INFO] Video finished — EXIT_ON_END=true, exiting.", flush=True)
-                    break
-
-                current_video_idx = (current_video_idx + 1) % len(video_playlist)
-                next_video = video_playlist[current_video_idx]
-                capture.change_source(next_video)
-
+            # ── Idle mode (off by default) ─────────────────────────────────────
+            # Disabled unless `idle_detect_stride` is changed from 1, because
+            # skipping frames means not seeing production that happens while
+            # the KDS is blank.  When it IS enabled, the gate is card presence
+            # rather than payment: a card appears well before it is confirmed
+            # paid, and production often starts in that window, so the detector
+            # must already be running by the time the ticket activates.
+            idle_now = (
+                idle_enabled
+                and kds_video is not None
+                and not kds_video.has_screen_content
+            )
+            if idle_now != _idle_state:
+                _idle_state = idle_now
+                if idle_now:
+                    how = (
+                        "throttled to 1 frame in %d" % idle_detect_stride
+                        if idle_detect_stride > 0
+                        else "stopped"
+                    )
+                    logger.info("Detection %s - KDS screen is empty", how)
+                    _idle_t0 = time.perf_counter()
+                    _idle_frames = 0
+                else:
+                    logger.info("Detection resumed - something is on the KDS")
+            skip_detection = idle_now and (
+                idle_detect_stride <= 0 or (frame_count % idle_detect_stride) != 0
+            )
 
             detect_start = time.perf_counter()
-            detections = detector.detect(frame, conf_threshold=confidence)
+            if skip_detection:
+                detections = []
+                _idle_frames += 1
+                if _idle_frames % 300 == 0:
+                    _idle_elapsed = time.perf_counter() - _idle_t0
+                    logger.info(
+                        "Idle: %d frames skimmed at %.1f fps (KDS still empty)",
+                        _idle_frames,
+                        _idle_frames / _idle_elapsed if _idle_elapsed > 0 else 0.0,
+                    )
+            else:
+                detections = detector.detect(frame, conf_threshold=confidence)
             detect_ms = (time.perf_counter() - detect_start) * 1000.0
+
+            if skip_detection:
+                # Idle fast path.  Everything below this point is tracking and
+                # validation work that only means something when an order is
+                # live.  It is skipped wholesale rather than fed empty
+                # detections -- WrappingStateMachine treats a track vanishing
+                # as "done", so empty input would fire bogus completions.
+                idle_view = frame.copy()
+                cv2.putText(
+                    idle_view,
+                    "IDLE - KDS screen empty (detection off, full-speed playback)",
+                    (14, 30),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.6,
+                    (180, 180, 180),
+                    1,
+                    cv2.LINE_AA,
+                )
+                update_frame_data(
+                    idle_view,
+                    state_machine.current_ticket,
+                    state_machine.get_current_order(),
+                    state_machine.get_stats(),
+                    detections={},
+                    hotdog_log=hotdog_tracker.get_hotdog_log(),
+                )
+                if kds_video is not None:
+                    dashboard.set_kds_state(kds_video.dashboard_state())
+                loop_ms = (time.perf_counter() - loop_start) * 1000.0
+                frame_count += 1
+                continue
 
             # Log YOLO detections for debugging
             with open("output/yolo_detections.log", "a") as f:
@@ -1109,6 +1135,11 @@ def main():
                 prev_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
             flow_ms = (time.perf_counter() - flow_start) * 1000.0
 
+            requires_relish = False
+            if state_machine.batch_validator:
+                if "relish" in state_machine.batch_validator.required_counts:
+                    requires_relish = True
+
             temporal_start = time.perf_counter()
             actions = temporal.update(
                 hand_detections,
@@ -1117,6 +1148,8 @@ def main():
                 h,
                 flow_signals,
                 current_time=current_time,
+                hotdog_detections=[d for d in detections if d.class_name == "hot-dog"],
+                requires_relish=requires_relish,
             )
             temporal_ms = (time.perf_counter() - temporal_start) * 1000.0
 
@@ -1482,12 +1515,18 @@ def main():
             tracker_detections = [
                 det for det in detections if det.class_name != "ketchup_sauce"
             ]
+
+            expected_hotdogs = 1
+            if state_machine.current_ticket:
+                expected_hotdogs = state_machine.current_ticket.total_hotdogs
+
             hotdog_tracker.update(
                 tracker_detections,
                 current_time=current_time,
                 frame=frame,
                 active_ticket_id=active_ticket_id,
                 done_ids=_wrapping_done_mono,
+                expected_hotdogs=expected_hotdogs,
             )
 
             is_ending_soon = False
@@ -1518,7 +1557,7 @@ def main():
                 frame_idx=frame_count,
                 current_time=current_time,
                 hotdog_detections=_hotdog_dets_mono,
-                wrapping_detections=[d for d in detections if d.class_name in ("wrapping", "wrapper")],
+                wrapping_detections=[d for d in detections if d.class_name in ("wrapping", "wrapper", "reg_clamshell")],
                 wrapped_detections=[d for d in detections if d.class_name == "wrapped"],
                 video_ending_soon=is_ending_soon,
             )
@@ -1538,32 +1577,30 @@ def main():
                     if state_machine.current_order:
                         state_machine.current_order.ending_soon = True
                     add_event("hover", zone="wrapping", item="about_to_complete", duration=0.4)
-                    print(
-                        f"\n{'='*54}\n"
-                        f"  [WRAPPING] hotdog tid={_ev['hotdog_tid']}  →  ABOUT TO COMPLETE\n"
-                        f"  frame={_ev['frame']}  t={_ev['timestamp']:.2f}s  "
-                        f"dwell={_ev.get('wrapping_dwell_s', '?')}s\n"
-                        f"{'='*54}",
-                        flush=True,
-                    )
                 elif _ev_type == "done":
                     if state_machine.current_order:
                         state_machine.current_order.ending_soon = False
                     if _mono is not None:
                         hotdog_tracker._permanent_done_ids.add(_mono)
                     add_event("place", zone="assembly", item="wrapped_hotdog", duration=1.0)
-                    print(
-                        f"\n{'='*54}\n"
-                        f"  [WRAPPING] hotdog tid={_ev['hotdog_tid']}  →  ORDER DONE ✓\n"
-                        f"  frame={_ev['frame']}  t={_ev['timestamp']:.2f}s\n"
-                        f"{'='*54}",
-                        flush=True,
-                    )
+                    # Feed the KDS FIFO one confirmed physical hotdog.  A
+                    # wrapping "done" is already temporally confirmed by
+                    # WrappingStateMachine, so this is never a single-frame
+                    # detection (section 8).  The type is inferred from the
+                    # ingredients the zone pipeline attributed to this track.
+                    if kds_video is not None and _mono is not None:
+                        kds_video.record_hotdog(
+                            item=_infer_hotdog_item(kds_video, hotdog_tracker, _mono),
+                            track_id=_mono,
+                            confidence=1.0,
+                            now=current_time,
+                        )
+
 
             # POS / KDS Fusion Mismatch Validation (throttled alert)
             if state_machine.current_ticket:
                 t_id = state_machine.current_ticket.ticket_id
-                exp_count = len(state_machine.current_ticket.expected_items)
+                exp_count = state_machine.current_ticket.total_hotdogs
                 h_log = hotdog_tracker.get_hotdog_log()
                 active_tracks = [
                     rec for rec in h_log.values()
@@ -1577,9 +1614,16 @@ def main():
                             main._last_pos_alert_t = {}
                         main._last_pos_alert_t[t_id] = current_time
                         logger.warning(
-                            "[POS_FUSION_ALERT] Ticket %s expects %d items, but vision tracked %d active items!",
+                            "[POS_FUSION_ALERT] Ticket %s expects %d hotdogs, but vision tracked %d active hotdogs!",
                             t_id, exp_count, vision_count
                         )
+                
+                if state_machine.current_order:
+                    state_machine.current_order.picked_counts["hot-dog"] = vision_count
+                    state_machine.calculate_validation(
+                        state_machine.current_order, 
+                        is_final=(state_machine.current_order.status.value == "completed")
+                    )
 
             detection_counts = {}
             for det in visible_detections:
@@ -1593,6 +1637,7 @@ def main():
             # Check active hotdogs in tracker (with persistence to prevent flickering)
             has_active_hotdogs = len(hotdog_tracker._records) > 0
             if has_active_hotdogs:
+                main._no_hotdogs_start_t = None
                 cart_machine.process_event(CartEvent(event_type=EventType.HOTDOG_DETECTED))
                 for tid, rec in hotdog_tracker._records.items():
                     z = zones.get_zone_for_bbox(rec.bbox, w, h, is_hand=False)
@@ -1604,28 +1649,21 @@ def main():
 
             draw_annotations._hotdog_log_ref = hotdog_tracker.get_hotdog_log()
             draw_annotations._current_video_time = current_time
-            draw_annotations._done_ids = set(wrapping_sm.done_ids) | getattr(hotdog_tracker, "_permanent_done_ids", set())
+            draw_annotations._done_ids = set()
             draw_annotations._detector_id_map = dict(getattr(hotdog_tracker, "_detector_id_map", {}))
             annotated = draw_annotations(
                 frame.copy(), visible_detections, zones, state_machine.get_current_order()
             )
-            # ── Wrapping-state overlays (additive — do not remove) ────────────
-            # Draws "About to Complete" and "Order Done" banners on the frame
-            # AFTER existing annotations, so nothing existing is overwritten.
-            _draw_wrapping_overlays(
-                annotated, frame_count, detections, wrapping_sm
-            )
-            # ── Exit-line tripwire rendering & crossing detection ─────────────
-            annotated = _draw_exit_line_overlays(
-                annotated, hand_detections, wrapping_sm, hotdog_tracker
-            )
-            # Translate wrapping done_ids (YOLO/monotonic track_ids) → monotonic hotdog IDs
-            # so they match the IDs used in hotdog_tracker.get_hotdog_log().
-            _wrapping_done_mono = set(wrapping_sm.done_ids) | set(getattr(hotdog_tracker, "_permanent_done_ids", set()))
+
+            _wrapping_done_mono = set()
             for _yolo_tid in list(wrapping_sm.done_ids):
                 _mono = hotdog_tracker._detector_id_map.get(_yolo_tid)
                 if _mono is not None:
                     _wrapping_done_mono.add(_mono)
+
+            # ── Overlay KDS Image ──────────────────────────────────────────────
+            # Removed KDS overlay on video feed (now displayed in dashboard)
+            # ───────────────────────────────────────────────────────────────────
 
             update_frame_data(
                 annotated,
@@ -1638,6 +1676,37 @@ def main():
                 hotdog_log=hotdog_tracker.get_hotdog_log(),
                 wrapping_done_ids=_wrapping_done_mono,
             )
+
+            # KDS FIFO queue, completed/warning lists and the event timeline.
+            if kds_video is not None:
+                dashboard.set_kds_state(kds_video.dashboard_state())
+
+                # Record the dashboard view for every live ticket.  The clip is
+                # kept only if that order ends up WRONG (see FailureRecorder).
+                if failure_recorder is not None and failure_recorder.enabled:
+                    active = kds_video.manager.active_group
+                    if active is not None or failure_recorder.active:
+                        status = "no active ticket"
+                        if active is not None:
+                            status = "TICKET %s   %d/%d hotdogs   %s" % (
+                                active.ticket_id,
+                                active.detected_total,
+                                active.expected_total,
+                                active.state.value,
+                            )
+                        dash_frame = compose_dashboard_frame(
+                            annotated,
+                            kds_video.annotated_kds_frame,
+                            status=status,
+                        )
+                        if dash_frame is not None:
+                            # A clip can only start once there is a frame to
+                            # size the writer from, so creation is deferred to
+                            # here rather than done in the event listener.
+                            for ticket_id in list(_pending_recordings):
+                                failure_recorder.start(ticket_id, dash_frame)
+                                _pending_recordings.discard(ticket_id)
+                            failure_recorder.write(dash_frame)
 
             loop_ms = (time.perf_counter() - loop_start) * 1000.0
             frame_count += 1
@@ -1669,8 +1738,12 @@ def main():
                 )
                 last_metrics_time = now
     except KeyboardInterrupt:
-        pass
+        print("[DIAG] Exiting via KeyboardInterrupt", flush=True)
+    except Exception as _diag_exc:
+        print(f"[DIAG] Exiting via EXCEPTION: {type(_diag_exc).__name__}: {_diag_exc}", flush=True)
+        import traceback; traceback.print_exc()
     finally:
+        print("[DIAG] In finally block — main loop ended", flush=True)
         # ── Sync wrapping states before emitting final summary ────────────
         try:
             hotdog_tracker.sync_wrapping_states(wrapping_sm)
@@ -1693,8 +1766,60 @@ def main():
         except Exception as e:
             logger.debug("Failed to write final hotdog summary: %s", e)
 
+        if state_machine.current_order and state_machine.current_order.status == OrderStatus.IN_PROGRESS:
+            state_machine.finalize_current_order()
+
+        # Any ticket still on the KDS gets one last validation rather than
+        # being silently dropped.
+        if kds_video is not None:
+            try:
+                kds_video.finalize_all()
+                kds_video.stop()
+            except Exception:
+                logger.debug("KDS video shutdown failed", exc_info=True)
+        if failure_recorder is not None:
+            try:
+                # An order still open at shutdown was never verified, so its
+                # clip is kept rather than thrown away.
+                failure_recorder.close()
+                logger.info(
+                    "Failure clips kept: %d, discarded (order correct): %d",
+                    failure_recorder.kept,
+                    failure_recorder.discarded,
+                )
+            except Exception:
+                logger.debug("failure recorder shutdown failed", exc_info=True)
+
         state_machine.save_history()
         capture.release()
+        
+        # Play alert sound if the order failed
+        try:
+            if state_machine.stats and state_machine.stats.failed_orders > 0:
+                print("Order failed!")
+        except Exception as e:
+            print("Failed to check order status:", e)
+        
+        
+        # EXIT_ON_END: return instead of parking, so an unattended batch run
+        # (scripts/run_full_and_shutdown.py) can tell that the work is finished.
+        # Without this the process sits here forever waiting for Ctrl+C and no
+        # caller can ever see it complete.
+        if exit_on_end:
+            print('\nVideo processing complete. Exiting (EXIT_ON_END).')
+            return
+
+        # Keep the dashboard running after the video finishes.
+        # Use a sleep loop instead of .join() so that Ctrl+C can interrupt it.
+        # The dashboard thread is a daemon — it will be killed automatically
+        # when the main (foreground) thread exits.
+        print('\nVideo processing complete! The dashboard is still running at http://localhost:8000')
+        print('Press Ctrl+C to exit.')
+        try:
+            while dashboard_thread.is_alive():
+                time.sleep(0.5)
+        except KeyboardInterrupt:
+            print('\nShutting down...')
 
 
 if __name__ == "__main__":

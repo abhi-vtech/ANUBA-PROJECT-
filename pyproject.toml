@@ -3,7 +3,7 @@ name = "object-action-detection"
 version = "0.1.0"
 description = "Restaurant food preparation monitoring system"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.10, <3.13"
 dependencies = [
     "ultralytics>=8.3.0",
     "opencv-python>=4.10.0",
@@ -20,6 +20,12 @@ dependencies = [
     "torch>=2.5.1",
     "torchvision>=0.20.1",
     "torchaudio>=2.5.1",
+    # KDS screen OCR.  RapidOCR ships PP-OCR models on onnxruntime: pure pip,
+    # no system binary, CPU-fast, and installable on Jetson aarch64.
+    "rapidocr-onnxruntime>=1.4.4",
+    # Capped below 1.24: that release dropped cp310 wheels, and this project
+    # supports Python 3.10, so an open pin makes `uv run` unresolvable.
+    "onnxruntime>=1.19,<1.24",
 ]
 
 [project.optional-dependencies]

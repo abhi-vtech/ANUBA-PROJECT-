@@ -1,4 +1,4 @@
-source: videos/order1.mp4
+source: videos/kds_3.mp4
 
 model_type: yolo-seg
 model_path: "rf_trained/weights (1).pt"
@@ -30,11 +30,31 @@ frame_width: 1280
 frame_height: 720
 fps: 30
 confidence_threshold: 0.5
-hotdog_conf_threshold: 0.70
+hotdog_conf_threshold: 0.55
 wrapping_conf_threshold: 0.15
 wrapping_dwell_s: 0.1                  # wrapping detection overlap required for "About to Complete" (seconds)
 wrapping_min_closing_frames: 30        # minimum frames "About to Complete" stays active (~1 second)
 wrapping_done_delay_s: 1.0             # delay after hotdog becomes invisible before "Order Done" (seconds)
-kds_mode: mock              # mock | dynamic
+kds_mode: mock              # mock | dynamic | video
+# Used when kds_mode: video (or override with KDS_SOURCE).
+#   videos/KDS_Feed/ -> the KDS screen recording
+#   videos/KDS/      -> the matching kitchen camera (set as `source:` above)
+kds_source: videos/KDS_Feed/Wienerschnitzel_Sacramento_CA_95818__kds__2026_09_06_11_to_12_PDT.mkv
+kds_timeline: output/kds_timeline.jsonl
+
+# Record the dashboard view (production feed + KDS feed) for every ticket and
+# KEEP the clip only when that order ends up WRONG.  Correct orders are
+# recorded and then deleted, so the disk only ever holds failures.
+record_failures: true
+failure_clip_dir: output/failures
+failure_clip_fps: 10
+failure_clip_max_s: 900        # safety cap per clip
+
+# Idle mode: 1 disables it -- detection runs on every frame regardless of what
+# the KDS screen shows.  Set >1 to run YOLO on 1 frame in N while the screen is
+# blank, or 0 to stop detection entirely while it is; either lets empty
+# stretches play through faster, at the cost of not seeing production that
+# starts before a ticket appears.
+idle_detect_stride: 1
 kds_poll: 2                 # seconds between ticket polls (mock mode)
 kds_history: output/orders.jsonl

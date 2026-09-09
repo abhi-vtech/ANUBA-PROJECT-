@@ -1,0 +1,206 @@
+{
+  "test5": {
+    "ticket_id": "test5",
+    "total_hotdogs": 2,
+    "hotdog1": [
+      "yellow cheese (sliced)",
+      "chilli"
+    ],
+    "hotdog2": [
+      "sauerkraut",
+      "yellow mustard sauce"
+    ]
+  },
+  "test_example_1": {
+    "ticket_id": "KDS01",
+    "total_hotdogs": 3,
+    "hotdog1": [
+      "chilli"
+    ],
+    "hotdog2": [
+      "chilli"
+    ],
+    "hotdog3": [
+      "yellow cheese (sliced)",
+      "onions",
+      "chilli"
+    ]
+  },
+  "ORD-003": {
+    "ticket_id": "ORD-003",
+    "total_hotdogs": 3,
+    "hotdog1": [
+      "chilli",
+      "grated_yellow_cheese"
+    ],
+    "hotdog2": [
+      "chilli",
+      "grated_yellow_cheese"
+    ],
+    "hotdog3": [
+      "chilli",
+      "grated_yellow_cheese"
+    ]
+  },
+  "ORD-004": {
+    "ticket_id": "ORD-004",
+    "total_hotdogs": 3,
+    "hotdog1": [
+      "chilli",
+      "grated_yellow_cheese"
+    ],
+    "hotdog2": [
+      "chilli",
+      "grated_yellow_cheese"
+    ],
+    "hotdog3": [
+      "yellow mustard sauce",
+      "pickle spears",
+      "tomato",
+      "relish",
+      "onions",
+      "sport peppers"
+    ]
+  }
+}
+
+{
+  "tickets": [
+    {
+      "ticket_id": "test6",
+      "shortcut": "5 ORG CHL MUST",
+      "total_hotdogs": 5,
+      "hotdog1": [
+        "chilli",
+        "yellow mustard sauce"
+      ],
+      "hotdog2": [
+        "chilli",
+        "yellow mustard sauce"
+      ],
+      "hotdog3": [
+        "chilli",
+        "yellow mustard sauce"
+      ],
+      "hotdog4": [
+        "chilli",
+        "yellow mustard sauce"
+      ],
+      "hotdog5": [
+        "chilli",
+        "yellow mustard sauce"
+      ]
+    }
+  ]
+}
+
+{
+  "tickets": [
+    {
+      "ticket_id": "test7",
+      "shortcut": "3 ORG CHL, 2 MUST",
+      "total_hotdogs": 3,
+      "hotdog1": [
+        "chilli",
+        "yellow mustard sauce"
+      ],
+      "hotdog2": [
+        "chilli",
+        "yellow mustard sauce"
+      ],
+      "hotdog3": [
+        "chilli"
+      ]
+    }
+  ]
+}
+
+
+{
+  "tickets": [
+    {
+      "ticket_id": "kds_3",
+      "shortcut": "2 Org Chicgo",
+      "total_hotdogs": 2,
+      "hotdog1": [
+        "yellow mustard sauce",
+        "pickle spears",
+        "tomato",
+        "relish",
+        "onions",
+        "sport peppers"
+      ],
+      "hotdog2": [
+        "yellow mustard sauce",
+        "pickle spears",
+        "tomato",
+        "relish",
+        "onions",
+        "sport peppers"
+      ]
+    }
+  ]
+} 
+{
+  "tickets": [
+    {
+      "ticket_id": "kds_4",
+      "shortcut": "2 AB Must- 2onions,2Ketchup",
+      "total_hotdogs": 2,
+      "hotdog1": [
+        "yellow mustard sauce",
+        "ketchup_sauce",
+        "onions"
+      ],
+      "hotdog2": [
+        "yellow mustard sauce",
+        "ketchup_sauce",
+        "onions"
+      ]
+    }
+  ]
+}
+{
+  "tickets": [
+    {
+      "ticket_id": "kds_5",
+      "shortcut": "10 ORG CHL",
+      "total_hotdogs": 10,
+      "hotdog1": [
+        "chilli",
+        "onions"
+      ],
+      "hotdog2": [
+        "chilli",
+        "onions"
+      ],
+      "hotdog3": [
+        "chilli",
+        "onions"
+      ],
+      "hotdog4": [
+        "chilli",
+        "onions"
+      ],
+      "hotdog5": [
+        "chilli",
+        "onions"
+      ],
+      "hotdog6": [
+        "chilli"
+      ],
+      "hotdog7": [
+        "chilli"
+      ],
+      "hotdog8": [
+        "chilli"
+      ],
+      "hotdog9": [
+        "chilli"
+      ],
+      "hotdog10": [
+        "chilli"
+      ]
+    }
+  ]
+}

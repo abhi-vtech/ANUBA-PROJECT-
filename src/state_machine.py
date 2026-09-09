@@ -1,12 +1,89 @@
 import json
 from collections import Counter
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
+import logging
 from src.schemas import Action, Order, OrderStatus, Stats, Ticket
+from src.batch_validator import BatchOrderValidator, normalize_item_name
+from src.ingredient_config import is_granular
+
+logger = logging.getLogger(__name__)
+
+# Granular ingredients: multiple pinches within this window = 1 serving count.
+# Tune after reviewing inter-pinch timestamps in logs.
+SERVING_GAP_S: float = 3.5
+
+# Onion: raised to 12s because small hovers were triggering false additions.
+# Worker typically scoops onions in one batch; a 12s window treats the whole
+# batch as one serving and prevents multiple short-hover increments.
+ONION_SERVING_GAP_S: float = 4.0
+
+# Discrete ingredients: rapid duplicate frame events within this window are ignored.
+DISCRETE_DEBOUNCE_S: float = 1.8
+
+
+def _extract_ticket_counts(ticket: Ticket) -> Tuple[List[str], Counter, int]:
+    expected_items = []
+    counts = Counter()
+    
+    total_hotdogs = getattr(ticket, "total_hotdogs", 1)
+
+    if getattr(ticket, "hotdog_specs", None):
+        for hd_name, items_val in ticket.hotdog_specs.items():
+            if isinstance(items_val, (list, tuple)):
+                for item in items_val:
+                    counts[item] += 1
+                    expected_items.append(item)
+            elif isinstance(items_val, dict):
+                for item, qty in items_val.items():
+                    counts[item] += qty
+                    expected_items.extend([item] * qty)
+    elif getattr(ticket, "expected_items", None):
+        for item in ticket.expected_items:
+            counts[item] += 1
+            expected_items.append(item)
+
+    # line_items and hotdog_specs can describe the SAME hotdogs.  When they do,
+    # counting both counts every ingredient twice -- the guard below used to
+    # compare a variant name against hotdog_specs keys, which are "hotdog1",
+    # "hotdog2", ... so it never matched and every KDS ticket was doubled.
+    specs_cover = getattr(ticket, "specs_cover_line_items", False)
+    for li in getattr(ticket, "line_items", []):
+        if specs_cover and getattr(ticket, "hotdog_specs", None):
+            continue
+        if getattr(ticket, "hotdog_specs", None) and li.variant in ticket.hotdog_specs:
+            continue
+        for item, qty in li.items.items():
+            counts[item] += qty * li.count
+            expected_items.extend([item] * (qty * li.count))
+    # Normalize item names
+    final_counts = Counter()
+    for item, qty in counts.items():
+        norm = normalize_item_name(item)
+        if norm == "hot_dog":
+            norm = "hot-dog"
+        final_counts[norm] += qty
+    
+    counts = final_counts
+    expected_items = list(counts.keys())
+
+    if (total_hotdogs == 1 or total_hotdogs == 0) and getattr(ticket, "hotdog_specs", None):
+        total_hotdogs = len(ticket.hotdog_specs)
+
+    if "hot-dog" not in counts or counts["hot-dog"] != total_hotdogs:
+        expected_items = [i for i in expected_items if i != "hot-dog"]
+        expected_items.extend(["hot-dog"] * total_hotdogs)
+        counts["hot-dog"] = total_hotdogs
+
+    return expected_items, counts, total_hotdogs
+
+
+    return expected_items, counts, total_hotdogs
 
 
 class OrderStateMachine:
+
     def __init__(self, history_path: Optional[str] = None):
         self.current_ticket: Optional[Ticket] = None
         self.current_order = Order(ticket_id="")
@@ -16,6 +93,11 @@ class OrderStateMachine:
         self._kds_client: Optional[object] = None
         self._history_path = history_path
         self.orders: List[Order] = []
+        self.batch_validator: Optional[BatchOrderValidator] = None
+        # Discrete ingredients: suppress duplicate frame events within DISCRETE_DEBOUNCE_S
+        self.last_debounced_ts: dict = {}
+        # Granular ingredients: track last serving timestamp for SERVING_GAP_S window
+        self.last_pinch_ts: dict = {}
 
         # Load history from JSONL file if it exists
         if history_path:
@@ -69,7 +151,7 @@ class OrderStateMachine:
                 self.orders.insert(0, hist_order) # Insert history at beginning
 
             for ticket in tickets:
-                counts = Counter(ticket.expected_items)
+                expected_items, counts, total_hotdogs = _extract_ticket_counts(ticket)
                 
                 # Check if this ticket was completed in history
                 hist_order = next((o for o in reversed(self.history) if o.ticket_id == ticket.ticket_id), None)
@@ -89,13 +171,15 @@ class OrderStateMachine:
                 existing = next((o for o in self.orders if o.ticket_id == ticket.ticket_id), None)
                 if existing:
                     # Update active ticket properties but preserve historical detection results
-                    existing.expected_items = list(ticket.expected_items)
+                    existing.expected_items = expected_items
                     existing.remaining_counts = dict(counts)
+                    existing.required_counts = dict(counts)
                 else:
                     order = Order(
                         ticket_id=ticket.ticket_id,
-                        expected_items=list(ticket.expected_items),
+                        expected_items=expected_items,
                         remaining_counts=dict(counts),
+                        required_counts=dict(counts),
                         picked_counts=picked_counts,
                         status=status,
                     )
@@ -103,6 +187,32 @@ class OrderStateMachine:
                     order.missing_items = missing
                     order.extra_items = extra
                     self.orders.append(order)
+
+    def update_kds_ticket(self, ticket: Ticket) -> bool:
+        """Apply a KDS content change to an order already in flight.
+
+        Distinct from :meth:`on_kds_ticket`, which resets picked_counts and
+        starts a fresh cycle.  Here the order keeps everything already
+        detected and only its requirement changes, so remaining is recomputed
+        against what has been made rather than reset.  Negative values are
+        deliberate: they mark items produced that the ticket does not ask for.
+        """
+        order = next(
+            (o for o in self.orders if o.ticket_id == ticket.ticket_id), None
+        )
+        if order is None:
+            return False
+
+        expected_items, counts, total_hotdogs = _extract_ticket_counts(ticket)
+        order.shortcut = ticket.shortcut
+        order.expected_items = expected_items
+        order.hotdog_count = total_hotdogs
+        order.required_counts = dict(counts)
+        order.remaining_counts = {
+            key: counts.get(key, 0) - order.picked_counts.get(key, 0)
+            for key in set(counts) | set(order.picked_counts)
+        }
+        return True
 
     def on_kds_ticket(self, ticket: Ticket):
         # Only accept a new ticket when no order is in progress
@@ -114,16 +224,27 @@ class OrderStateMachine:
 
         order = next((o for o in self.orders if o.ticket_id == ticket.ticket_id), None)
         if order is None:
-            counts = Counter(ticket.expected_items)
+            expected_items, counts, total_hotdogs = _extract_ticket_counts(ticket)
+            
             order = Order(
                 ticket_id=ticket.ticket_id,
-                expected_items=list(ticket.expected_items),
+                shortcut=ticket.shortcut,
+                expected_items=expected_items,
                 remaining_counts=dict(counts),
+                required_counts=dict(counts),
                 picked_counts={},
+                hotdog_count=total_hotdogs,
                 status=OrderStatus.IN_PROGRESS,
             )
             self.orders.append(order)
+
         else:
+            expected_items, counts, total_hotdogs = _extract_ticket_counts(ticket)
+            order.shortcut = ticket.shortcut
+            order.expected_items = expected_items
+            order.hotdog_count = total_hotdogs
+            order.remaining_counts = dict(counts)
+            order.required_counts = dict(counts)
             order.status = OrderStatus.IN_PROGRESS
             order.picked_counts = {}
             order.applied_sauces = []  # Reset sauce state for new cycle
@@ -136,6 +257,9 @@ class OrderStateMachine:
         self.current_ticket = ticket
         self.current_order = order
         self._validation_log.clear()
+        
+        # Initialize batch validator for the new ticket
+        self.batch_validator = BatchOrderValidator(ticket, strict_no_extras=False)
         self.calculate_validation(self.current_order, is_final=False)
 
 
@@ -149,9 +273,10 @@ class OrderStateMachine:
 
         # Direct canonical names lookup
         canonical_map = {
-            "yellow mustard sauce": "yellow_mustard",
-            "yellow_mustard_sauce": "yellow_mustard",
-            "yellow mustard": "yellow_mustard",
+            "yellow mustard sauce": "yellow_mustard_sauce",
+            "yellow_mustard_sauce": "yellow_mustard_sauce",
+            "yellow mustard": "yellow_mustard_sauce",
+            "yellow_mustard": "yellow_mustard_sauce",
 
             "pickles (rounds)": "pickle_rounds",
             "pickle rounds": "pickle_rounds",
@@ -222,14 +347,23 @@ class OrderStateMachine:
                 if self._normalize(k) == norm_ing:
                     matched_key = k
                     break
+            target_key = matched_key or ingredient
+            self.current_order.remaining_counts[target_key] = (
+                self.current_order.remaining_counts.get(target_key, 0) - 1
+            )
+            self.current_order.picked_counts[target_key] = (
+                self.current_order.picked_counts.get(target_key, 0) + 1
+            )
+
             self._validation_log.append(
                 {
-                    "ingredient": matched_key or ingredient,
-                    "status": "PICKUP",
+                    "ingredient": target_key,
+                    "status": "MATCH" if matched_key else "PICKUP",
                     "track_id": action.track_id,
                     "timestamp": action.timestamp,
                 }
             )
+
 
         elif action.action_type == "pick":
             ingredient = action.zone_name
@@ -263,103 +397,70 @@ class OrderStateMachine:
                 }
             )
 
-        elif action.action_type == "place":
+        elif action.action_type in ("place", "sauce"):
             ingredient = action.zone_name
-            remaining = self.current_order.remaining_counts
-
-            # Find matching expected ingredient key using normalization
             norm_ing = self._normalize(ingredient)
-            for k in remaining.keys():
-                if self._normalize(k) == norm_ing:
-                    matched_key = k
-                    break
+            now = action.timestamp
 
-            if matched_key is not None:
-                # Use the matched KDS key so counts align correctly
-                remaining[matched_key] -= 1
-                self.current_order.picked_counts[matched_key] = (
-                    self.current_order.picked_counts.get(matched_key, 0) + 1
-                )
-                self._validation_log.append(
-                    {
-                        "ingredient": matched_key,
-                        "status": "MATCH" if remaining[matched_key] >= 0 else "EXTRA",
-                        "track_id": action.track_id,
-                        "timestamp": action.timestamp,
-                    }
-                )
-            else:
-                if ingredient not in remaining:
-                    remaining[ingredient] = -1
+            # Only count ingredients that are required by the active KDS ticket
+            if self.batch_validator and norm_ing not in self.batch_validator.required_counts:
+                return matched_key
+
+            incremented = False
+
+            if is_granular(norm_ing):
+                # ── Granular branch (onions, relish, grated_yellow_cheese) ──────
+                # Multiple pinches within the serving-gap are treated as one serving.
+                # Onions use a longer gap (12s) to prevent small hovers from
+                # each being counted as a separate addition.
+                if "onion" in norm_ing:
+                    gap = ONION_SERVING_GAP_S
                 else:
-                    remaining[ingredient] -= 1
-                self.current_order.picked_counts[ingredient] = (
-                    self.current_order.picked_counts.get(ingredient, 0) + 1
-                )
-                self._validation_log.append(
-                    {
-                        "ingredient": ingredient,
-                        "status": "EXTRA",
-                        "track_id": action.track_id,
-                        "timestamp": action.timestamp,
-                    }
-                )
-
-        elif action.action_type == "sauce":
-            sauce = action.zone_name
-
-            # Check if normalized sauce is already applied
-            norm_sauce = self._normalize(sauce)
-            already_applied = False
-            for s in self.current_order.applied_sauces:
-                if self._normalize(s) == norm_sauce:
-                    already_applied = True
-                    break
-
-            remaining = self.current_order.remaining_counts
-
-            # Find matching expected ingredient key
-            for k in remaining.keys():
-                if self._normalize(k) == norm_sauce:
-                    matched_key = k
-                    break
-
-            if matched_key is not None:
-                # Match found: map to the expected KDS key name
-                if matched_key not in self.current_order.applied_sauces:
-                    self.current_order.applied_sauces.append(matched_key)
-                self.current_order.picked_counts[matched_key] = (
-                    self.current_order.picked_counts.get(matched_key, 0) + 1
-                )
-                remaining[matched_key] -= 1
-                self._validation_log.append(
-                    {
-                        "ingredient": matched_key,
-                        "status": "MATCH" if remaining[matched_key] >= 0 else "EXTRA",
-                        "track_id": action.track_id,
-                        "timestamp": action.timestamp,
-                    }
-                )
+                    gap = SERVING_GAP_S
+                last_pinch = self.last_pinch_ts.get(norm_ing)
+                self.last_pinch_ts[norm_ing] = now  # always record the pinch time
+                if last_pinch is None or (now - last_pinch) >= gap:
+                    # New serving — count it
+                    self.current_order.picked_counts[norm_ing] = (
+                        self.current_order.picked_counts.get(norm_ing, 0) + 1
+                    )
+                    incremented = True
+                # else: same burst/serving — skip, don't increment
             else:
-                # No match found: register as extra sauce
-                if sauce not in self.current_order.applied_sauces:
-                    self.current_order.applied_sauces.append(sauce)
-                self.current_order.picked_counts[sauce] = (
-                    self.current_order.picked_counts.get(sauce, 0) + 1
+                # ── Discrete branch (all other ingredients) ───────────────────
+                # Suppress rapid duplicate frame events within DISCRETE_DEBOUNCE_S.
+                last_t = self.last_debounced_ts.get(norm_ing, 0.0)
+                
+                # Chilli uses a shorter debounce to allow for fast second scoops
+                debounce_time = 0.8 if "chilli" in norm_ing else DISCRETE_DEBOUNCE_S
+                
+                if (now - last_t) < debounce_time:
+                    return matched_key
+                self.last_debounced_ts[norm_ing] = now
+                self.current_order.picked_counts[norm_ing] = (
+                    self.current_order.picked_counts.get(norm_ing, 0) + 1
                 )
-                if sauce not in remaining:
-                    remaining[sauce] = -1
-                else:
-                    remaining[sauce] -= 1
+                incremented = True
 
-                self._validation_log.append(
-                    {
-                        "ingredient": sauce,
-                        "status": "EXTRA",
-                        "track_id": action.track_id,
-                        "timestamp": action.timestamp,
-                    }
-                )
+            if not incremented:
+                return matched_key
+
+            if action.action_type == "sauce":
+                if norm_ing not in self.current_order.applied_sauces:
+                    self.current_order.applied_sauces.append(norm_ing)
+
+            # Delegate to BatchOrderValidator only when count was incremented
+            if self.batch_validator:
+                self.batch_validator.on_place_event(norm_ing)
+
+            self._validation_log.append(
+                {
+                    "ingredient": norm_ing,
+                    "status": "PLACED" if action.action_type == "place" else "SAUCE",
+                    "track_id": action.track_id,
+                    "timestamp": now,
+                }
+            )
 
         self.calculate_validation(self.current_order, is_final=False)
         return matched_key
@@ -421,86 +522,103 @@ class OrderStateMachine:
         if not order.ticket_id:
             return
 
-        expected_counts = Counter(order.expected_items)
-        picked_counts = order.picked_counts
+        if self.batch_validator:
+            if "hot-dog" in order.picked_counts:
+                self.batch_validator.observed_counts["hot-dog"] = order.picked_counts["hot-dog"]
+            result_dict = self.batch_validator.validate(is_final=is_final)
+            
+            # Sync back adjusted observed_counts to picked_counts so UI shows the forgiven amounts
+            for ing, cnt in self.batch_validator.observed_counts.items():
+                if cnt > 0:
+                    order.picked_counts[ing] = cnt
+                    
+            order.passed = result_dict["passed"]
+            order.missing_items = list(result_dict["missing"].keys())
+            order.extra_items = list(result_dict["extra"].keys())
+            wrong = [item for item in result_dict["extra"].keys() if item not in self.batch_validator.required_counts]
+            order.wrong_items = wrong
 
-        details = []
-        missing_items = []
-        extra_items = []
-        wrong_items = []
+            if wrong and order.extra_items:
+                order.validation_message = "Wrong + Extra Ingredients"
+                order.passed = False
+            elif wrong:
+                order.validation_message = "Wrong Ingredients"
+                order.passed = False
+            else:
+                order.validation_message = result_dict["message"]
 
-        # Process expected ingredients
-        for ingredient, expected_qty in expected_counts.items():
-            picked_qty = picked_counts.get(ingredient, 0)
-
-            # Find the timestamp of when this ingredient was last added
-            timestamps = [x["timestamp"] for x in self._validation_log if x.get("ingredient") == ingredient and "timestamp" in x]
-            timestamp = timestamps[-1] if timestamps else None
-
-            if picked_qty > 0:
-                if picked_qty <= expected_qty:
+            order.dashboard_slots = self.batch_validator.distribute_for_dashboard(result_dict["missing"])
+            details = []
+            for ingredient, count in self.batch_validator.observed_counts.items():
+                if count > 0:
                     details.append({
                         "name": ingredient,
-                        "quantity": picked_qty,
-                        "timestamp": timestamp,
+                        "quantity": count,
+                        "timestamp": None,
                         "status": "correct"
                     })
-                else:
-                    details.append({
-                        "name": ingredient,
-                        "quantity": picked_qty,
-                        "timestamp": timestamp,
-                        "status": "extra"
-                    })
-                    extra_items.append(ingredient)
-            else:
-                if is_final:
-                    details.append({
-                        "name": ingredient,
-                        "quantity": 0,
-                        "timestamp": None,
-                        "status": "missing"
-                    })
-                    missing_items.append(ingredient)
+            order.added_items_details = details
+            return
 
-        # Process wrong ingredients (picked but not expected at all)
-        for ingredient, picked_qty in picked_counts.items():
-            if ingredient not in expected_counts:
-                # Find the timestamp
-                timestamps = [x["timestamp"] for x in self._validation_log if x.get("ingredient") == ingredient and "timestamp" in x]
-                timestamp = timestamps[-1] if timestamps else None
+        # Fallback for pickup actions operating on remaining_counts
+        missing = [item for item, count in order.remaining_counts.items() if count > 0]
+        extra = [item for item, count in order.remaining_counts.items() if count < 0]
+        wrong = [item for item in extra if item not in order.expected_items]
 
-                details.append({
-                    "name": ingredient,
-                    "quantity": picked_qty,
-                    "timestamp": timestamp,
-                    "status": "wrong"
-                })
-                wrong_items.append(ingredient)
+        order.missing_items = missing
+        order.extra_items = extra
+        order.wrong_items = wrong
 
-        order.added_items_details = details
-        order.missing_items = missing_items
-        order.extra_items = extra_items
-        order.wrong_items = wrong_items
+        passed = (len(missing) == 0 and len(extra) == 0 and len(wrong) == 0)
+        order.passed = passed
 
-        if order.status == OrderStatus.ABANDONED:
-            order.passed = False
-            order.validation_message = "Abandoned"
+        if wrong and extra:
+            order.validation_message = "Wrong + Extra Ingredients"
+        elif wrong:
+            order.validation_message = "Wrong Ingredients"
+        elif passed:
+            order.validation_message = f"Order {order.ticket_id}: correct — all items confirmed."
         else:
-            order.passed = (len(missing_items) == 0 and len(extra_items) == 0 and len(wrong_items) == 0)
+            msg_parts = []
+            if missing:
+                msg_parts.append(f"missing: {', '.join(missing)}")
+            if extra:
+                msg_parts.append(f"extra: {', '.join(extra)}")
+            order.validation_message = f"Order {order.ticket_id}: issue detected — recheck order, " + "; ".join(msg_parts) + "."
 
-            parts = []
-            if len(missing_items) > 0:
-                parts.append("Missing")
-            if len(wrong_items) > 0:
-                parts.append("Wrong")
-            if len(extra_items) > 0:
-                parts.append("Extra")
+        details = []
+        detail_map = {}
+        for log_entry in self._validation_log:
+            ing = log_entry.get("ingredient")
+            ts = log_entry.get("timestamp")
+            if ing:
+                detail_map[ing] = ts
+        for ing, ts in detail_map.items():
+            st = "wrong" if ing in wrong else ("extra" if ing in extra else "correct")
+            details.append({
+                "name": ing,
+                "quantity": order.picked_counts.get(ing, 1),
+                "timestamp": ts,
+                "status": st
+            })
 
-            if len(parts) == 0:
-                order.validation_message = "Success"
-            else:
-                order.validation_message = " + ".join(parts) + (" Ingredients" if len(parts) > 1 else " Ingredient")
+
+
+        if not details:
+            for ingredient, count in order.picked_counts.items():
+                if count > 0:
+                    st = "extra" if ingredient in extra else ("wrong" if ingredient in wrong else "correct")
+                    details.append({
+                        "name": ingredient,
+                        "quantity": count,
+                        "timestamp": None,
+                        "status": st
+                    })
+        order.added_items_details = details
+
+
+
+
 
 
     def _append_order_to_file(self, order: Order):

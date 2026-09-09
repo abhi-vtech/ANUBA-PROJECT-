@@ -71,11 +71,22 @@ ITEM_CLASS_ALIASES = {
 logger = logging.getLogger(__name__)
 
 PROXIMITY_PAD_PX = 80
+# Dry ingredients are credited ONLY by a completed well trip: the hand dips
+# into an ingredient well and comes back to a hotdog (TemporalTracker's
+# trajectory mode -> force_commit_item).  With this True the dwell-based path
+# below is limited to sauces, where the bottle itself is the visible evidence.
+#
+# The dwell path used to credit a dry ingredient whenever its detection simply
+# sat near a hotdog for DEFAULT_ITEM_DWELL_S with a hand nearby -- no trip
+# required -- so it added ingredients independently of, and often before, the
+# trip logic.  Set False to restore that behaviour.
+DRY_ITEMS_REQUIRE_WELL_TRIP = False
+
 DEFAULT_ITEM_DWELL_S = 0.5
 
 DEFAULT_ITEM_DWELL_OVERRIDES = {
-    "ketchup_sauce":        0.2,
-    "yellow_mustard_sauce": 0.2,
+    "ketchup_sauce":        0.05,
+    "yellow_mustard_sauce": 0.05,
     "yellow_cheese":        0.2,
     "pickle_spears":        0.15,
     "pickle_rounds":        0.15,
@@ -598,6 +609,7 @@ class HotdogTracker:
         frame: Optional[np.ndarray] = None,
         active_ticket_id: Optional[str] = None,
         done_ids: Optional[Set[int]] = None,
+        expected_hotdogs: Optional[int] = None,
     ) -> None:
         self._frame_count += 1
         now = current_time if current_time is not None else time.time()
@@ -677,6 +689,7 @@ class HotdogTracker:
         matched_records: Dict[int, Tuple[int, int, int, int]] = {}
         unmatched_dets = list(hotdog_dets)
         unmatched_track_ids = set(active_tids)
+        self._active_detector_ids = set()
 
         # Pass 0: Direct ByteTrack track_id matching for known active tracks
         bytetrack_matched_indices = set()
@@ -690,10 +703,15 @@ class HotdogTracker:
                         rec_bbox = self._records[mon_tid].bbox
                         iou = max(_compute_iou(det.bbox, pred_bbox), _compute_iou(det.bbox, rec_bbox))
                         d_spatial = min(_centroid_distance(det.bbox, pred_bbox), _centroid_distance(det.bbox, rec_bbox))
-                        if iou >= 0.10 or d_spatial <= self._spatial_lock_radius:
+                        time_lost = now - self._records[mon_tid].last_seen
+                        max_dist = min(self._spatial_lock_radius, 40.0 + 20.0 * time_lost)
+                        
+                        if d_spatial <= max_dist and (iou >= 0.10 or d_spatial <= 30.0):
                             matched_records[mon_tid] = det.bbox
                             unmatched_track_ids.remove(mon_tid)
                             bytetrack_matched_indices.add(i)
+                            self._detector_id_map[det_tid] = mon_tid
+                            self._active_detector_ids.add(det_tid)
 
         if bytetrack_matched_indices:
             unmatched_dets = [d for idx, d in enumerate(unmatched_dets) if idx not in bytetrack_matched_indices]
@@ -717,11 +735,22 @@ class HotdogTracker:
                 if iou_matrix[r, c] >= min(0.25, self._iou_threshold):
                     det = unmatched_dets[r]
                     tid = unmatched_tid_list[c]
+                    
+                    pred_bbox = predicted_bboxes[tid]
+                    rec_bbox = self._records[tid].bbox
+                    d_spatial = min(_centroid_distance(det.bbox, pred_bbox), _centroid_distance(det.bbox, rec_bbox))
+                    time_lost = now - self._records[tid].last_seen
+                    max_dist = min(self._spatial_lock_radius, 40.0 + 20.0 * time_lost)
+                    
+                    if d_spatial > max_dist:
+                        continue
+                        
                     matched_records[tid] = det.bbox
                     unmatched_track_ids.remove(tid)
                     matched_det_indices.add(r)
                     if hasattr(det, 'track_id') and det.track_id is not None:
                         self._detector_id_map[det.track_id] = tid
+                        self._active_detector_ids.add(det.track_id)
 
             unmatched_dets = [d for idx, d in enumerate(unmatched_dets) if idx not in matched_det_indices]
 
@@ -732,9 +761,17 @@ class HotdogTracker:
                 det_tid = det.track_id
                 if det_tid in self._detector_id_map and self._detector_id_map[det_tid] in unmatched_track_ids:
                     mon_tid = self._detector_id_map[det_tid]
-                    matched_records[mon_tid] = det.bbox
-                    unmatched_track_ids.remove(mon_tid)
-                    yolo_matched_dets.append(det)
+                    pred_bbox = predicted_bboxes[mon_tid]
+                    rec_bbox = self._records[mon_tid].bbox
+                    d_spatial = min(_centroid_distance(det.bbox, pred_bbox), _centroid_distance(det.bbox, rec_bbox))
+                    time_lost = now - self._records[mon_tid].last_seen
+                    max_dist = min(self._spatial_lock_radius, 40.0 + 20.0 * time_lost)
+                    
+                    if d_spatial <= max_dist:
+                        matched_records[mon_tid] = det.bbox
+                        unmatched_track_ids.remove(mon_tid)
+                        yolo_matched_dets.append(det)
+                        self._active_detector_ids.add(det_tid)
 
         for d in yolo_matched_dets:
             unmatched_dets.remove(d)
@@ -865,6 +902,7 @@ class HotdogTracker:
                     matched_records[recovered_tid] = det.bbox
                     if hasattr(det, 'track_id') and det.track_id is not None:
                         self._detector_id_map[det.track_id] = recovered_tid
+                        self._active_detector_ids.add(det.track_id)
                 else:
                     still_unmatched_after_hand_transit.append(det)
 
@@ -878,15 +916,20 @@ class HotdogTracker:
                 best_tid = None
                 best_score = float('inf')
 
+                det_cx = (det.bbox[0] + det.bbox[2]) / 2.0
+                det_cy = (det.bbox[1] + det.bbox[3]) / 2.0
                 for tid in list(unmatched_track_ids):
                     rec = self._records[tid]
                     pred_bbox = predicted_bboxes[tid]
                     d_spatial = min(
                         _centroid_distance(det.bbox, pred_bbox),
                         _centroid_distance(det.bbox, rec.bbox),
+                        rec.distance_to_trail(det_cx, det_cy, max_time_gap=60.0, now=now),
                     )
 
-                    if d_spatial <= self._spatial_lock_radius:
+                    time_lost = now - rec.last_seen
+                    max_dist = min(self._spatial_lock_radius, 40.0 + 20.0 * time_lost)
+                    if d_spatial <= max_dist:
                         score = d_spatial
                         if score < best_score:
                             best_score = score
@@ -897,6 +940,7 @@ class HotdogTracker:
                     unmatched_track_ids.remove(best_tid)
                     if hasattr(det, 'track_id') and det.track_id is not None:
                         self._detector_id_map[det.track_id] = best_tid
+                        self._active_detector_ids.add(det.track_id)
                 else:
                     remaining_unmatched_dets.append(det)
 
@@ -912,6 +956,8 @@ class HotdogTracker:
             best_retired_tid = None
             best_combined_score = float('inf')
             best_retired_dist  = float('inf')
+            det_cx = (det.bbox[0] + det.bbox[2]) / 2.0
+            det_cy = (det.bbox[1] + det.bbox[3]) / 2.0
 
             for rtid, rrec in list(self._retired_records.items()):
                 if rtid in self._permanent_done_ids:
@@ -923,8 +969,21 @@ class HotdogTracker:
                 d_spatial = min(
                     _centroid_distance(det.bbox, rrec.bbox),
                     _centroid_distance(det.bbox, pred_r_bbox),
+                    rrec.distance_to_trail(det_cx, det_cy, max_time_gap=60.0, now=now),
                 )
-                if d_spatial > self._spatial_lock_radius:
+                time_lost = now - rrec.last_seen
+                max_dist = min(self._spatial_lock_radius, 40.0 + 20.0 * time_lost)
+                if d_spatial > max_dist:
+                    continue
+
+                rrec_cx = (rrec.bbox[0] + rrec.bbox[2]) / 2.0
+                rrec_cy = (rrec.bbox[1] + rrec.bbox[3]) / 2.0
+                det_cx = (det.bbox[0] + det.bbox[2]) / 2.0
+                det_cy = (det.bbox[1] + det.bbox[3]) / 2.0
+                
+                # Prevent swapping: if the track was lost inside the assembly (wrap) region,
+                # it cannot be recovered by a detection outside the assembly region.
+                if self._point_in_wrap_zone(rrec_cx, rrec_cy) and not self._point_in_wrap_zone(det_cx, det_cy):
                     continue
 
                 if rrec.last_hand_working_pos is not None and current_hand_pts:
@@ -966,6 +1025,7 @@ class HotdogTracker:
                 matched_records[best_retired_tid] = det.bbox
                 if hasattr(det, 'track_id') and det.track_id is not None:
                     self._detector_id_map[det.track_id] = best_retired_tid
+                    self._active_detector_ids.add(det.track_id)
                 self._wrap_zone_merges += 1
                 gap_s = now - recovered_rec.last_seen
                 logger.info(
@@ -1011,6 +1071,10 @@ class HotdogTracker:
         # Fix C: Stalled-track watchdog — before spawning, check if a recently-retired record
         # in the wrap zone occupies the same position. If so, merge instead of spawning new ID.
         _new_wrap_zone_tids: List[int] = []  # collect for callers (e.g. WrappingStateMachine)
+
+        # Sort left-to-right to guarantee stable monotonic ID assignment
+        unmatched_dets.sort(key=lambda d: d.bbox[0] + d.bbox[2])
+
         for det in unmatched_dets:
             det_cx = (det.bbox[0] + det.bbox[2]) / 2.0
             det_cy = (det.bbox[1] + det.bbox[3]) / 2.0
@@ -1071,11 +1135,29 @@ class HotdogTracker:
                 continue  # already handled above
 
             # Normal spawn path (distinct hotdogs get unique monotonic IDs)
-            new_tid = self._next_monotonic_id
-            self._next_monotonic_id += 1
+            new_tid = None
+            if expected_hotdogs is not None:
+                used_ids = set()
+                for r in self._records.values():
+                    if str(r.hotdog_id).isdigit(): used_ids.add(int(r.hotdog_id))
+                for r in self._retired_records.values():
+                    if getattr(r, 'status', '') == 'done' and str(r.hotdog_id).isdigit():
+                        used_ids.add(int(r.hotdog_id))
+                        
+                for i in range(1, expected_hotdogs + 1):
+                    if i not in used_ids:
+                        new_tid = i
+                        break
+                        
+                if new_tid is None:
+                    continue  # Capped at expected_hotdogs, ignore spurious detection
+            else:
+                new_tid = self._next_monotonic_id
+                self._next_monotonic_id += 1
 
             if hasattr(det, 'track_id') and det.track_id is not None:
                 self._detector_id_map[det.track_id] = new_tid
+                self._active_detector_ids.add(det.track_id)
 
             rec = HotdogRecord(
                 hotdog_id=str(new_tid),
@@ -1182,6 +1264,12 @@ class HotdogTracker:
 
             item_class = self._normalize_item_class_name(item_det.class_name)
             is_sauce = item_class in SAUCE_STRICT_OVERLAP_CLASSES
+
+            if DRY_ITEMS_REQUIRE_WELL_TRIP and not is_sauce:
+                # Dry ingredients arrive via force_commit_item() once a well
+                # trip completes; seeing one near a hotdog is not evidence that
+                # it was put ON the hotdog.
+                continue
 
             item_cx = (item_det.bbox[0] + item_det.bbox[2]) / 2.0
             item_cy = (item_det.bbox[1] + item_det.bbox[3]) / 2.0
@@ -1427,7 +1515,7 @@ class HotdogTracker:
         all_recs = {**self._records, **self._retired_records}
         
         import os
-        multi_id = os.environ.get("MULTI_ID", "false").lower() in ("1", "true", "yes")
+        multi_id = True
         
         if not multi_id and all_recs:
             # Single ID mode: merge all records into ID "1"
@@ -1540,7 +1628,7 @@ class HotdogTracker:
         all_recs = {**self._records, **self._retired_records}
 
         import os
-        multi_id = os.environ.get("MULTI_ID", "false").lower() in ("1", "true", "yes")
+        multi_id = True
 
         if not multi_id and all_recs:
             # Single ID mode: merge all records into a single order1

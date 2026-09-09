@@ -87,7 +87,7 @@ class VideoCaptureThread:
                     return None
                 if item is _LOOP_MARKER:
                     self._looped = True
-                    continue
+                    return None  # signal the main loop; it will call consume_loop() next
                 return item
         return self._frame
 

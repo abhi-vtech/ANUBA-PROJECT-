@@ -151,6 +151,45 @@ Tracks the final packaging lifecycle of each hotdog:
 
 ---
 
+## 4.5 KDS Video Reader, FIFO Grouping & Order Validation (`src/kds/`)
+
+A **second video input** reads the KDS screen itself and drives a strict FIFO
+order queue. Full documentation: [`src/kds/README.md`](src/kds/README.md).
+
+```
+KDS video -> TicketCardDetector -> TicketParser -> TicketStabilityTracker -.
+                                        |                                  |
+                                  BlinkDetector ------------------> TicketManager
+                                                                    (FIFO + validation)
+Production video -> Detector -> HotdogTracker -> WrappingStateMachine ----^
+```
+
+Run both inputs together:
+
+```powershell
+python run_kds_dual.py --kds <kds video> --production <kitchen video>
+```
+
+Key points:
+
+- **Only PAID tickets enter the system.** The green total bar reading
+  `*** Paid ***` (not `Subtotal`) must be confirmed over several observations
+  before an order group is created; creation happens exactly once per ticket.
+- **Yellow bars are hotdogs; grey/orange text below one is that hotdog's
+  add-on.** The parent-child relation is preserved end to end and an add-on is
+  never promoted to an order item.
+- **Shortcuts come only from `config/kds_shortcuts.yaml`.** Anything else is
+  logged as `UNKNOWN SHORTCUT` and never mapped onto an existing item.
+- **An order is judged when its ticket disappears from the KDS**, and only
+  then. The card body colour is an AGE state (white -> yellow -> pink as the
+  order gets older), so pink means *overdue*, never *finished*, and produces no
+  verdict. See `src/kds/README.md` for the evidence.
+- **Type matching is inference, not detection.** The weights have a single
+  `hot-dog` class, so quantity is reliable while the variant is inferred from
+  attributed ingredients and always reported with a low-confidence flag.
+
+---
+
 ## 5. Order Validation & POS / KDS Fusion (`src/state_machine.py`)
 
 - **`OrderStateMachine`**:
@@ -217,6 +256,7 @@ Internal/
 │   ├── wrapping_state.py       # Wrapping state machine & completion detector
 │   └── zones.py                # Polygon zone manager & geometric queries
 ├── tests/                      # 114 automated pytest unit & integration tests
+├── run_kds_dual.py             # Runner for KDS + production dual input
 ├── run_10min_video.py          # Runner for 10-minute production test video
 ├── run_full_video.py           # Runner for 1-hour full camera video
 ├── run_video.py                # Generic video runner

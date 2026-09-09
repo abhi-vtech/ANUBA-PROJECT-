@@ -172,6 +172,8 @@ class _HotdogWrapState:
     disappear_frame: Optional[int] = None    # frame when hotdog first disappeared
 
     last_bbox: Optional[Tuple[int, int, int, int]] = None
+    had_wrapper_overlap: bool = False
+
 
 
 # ── Main state machine ─────────────────────────────────────────────────────────
@@ -311,6 +313,9 @@ class WrappingStateMachine:
                 if coverage > best_coverage:
                     best_coverage = coverage
 
+            if best_coverage > 0.0:
+                rec.had_wrapper_overlap = True
+
             wrapping_overlaps = best_coverage >= self.min_coverage_ratio
 
             if wrapping_overlaps:
@@ -373,11 +378,12 @@ class WrappingStateMachine:
                     rec.wrapping_dwell_start = None
                     rec.wrapping_last_seen   = None
 
-        # ── Step 2: CLOSING → DONE transitions ────────────────────────────────
-        # A CLOSING hotdog transitions to DONE when its track_id is absent from
-        # detections continuously for done_delay_s (default 3.0s delay after becoming invisible).
+        # ── Step 2: CLOSING/ACTIVE → DONE transitions ─────────────────────────
+        # A hotdog transitions to DONE when its track_id is absent from detections.
+        # For CLOSING hotdogs, the delay is done_delay_s (default 3.0s).
+        # For ACTIVE hotdogs (never formally wrapped), we force it to DONE if absent for > 3.0s.
         for tid, rec in list(self._states.items()):
-            if rec.state != STATE_CLOSING:
+            if rec.state == STATE_DONE:
                 continue
             if tid in active_tids:
                 # Hotdog is visible again — reset disappearance timer
@@ -423,16 +429,24 @@ class WrappingStateMachine:
                 })
                 continue
 
-            # Verify disappearance delay threshold (e.g. 1.0s delay after becoming not visible)
+            # Verify disappearance delay threshold.
+            # If it was CLOSING, use done_delay_s. If ACTIVE with wrapper overlap, use min(done_delay_s, 5.0).
             invisible_duration_s = current_time - rec.disappear_time
-            if invisible_duration_s < self.done_delay_s:
+            if rec.state == STATE_CLOSING:
+                required_delay = self.done_delay_s
+            elif getattr(rec, "had_wrapper_overlap", False) or rec.wrapping_last_seen is not None:
+                required_delay = min(self.done_delay_s, 5.0)
+            else:
+                required_delay = 3.0
+            
+            if invisible_duration_s < required_delay:
                 continue
 
             # Verify minimum closing frames threshold (30 frames)
             closing_duration = (
                 (frame_idx - rec.closing_frame) if rec.closing_frame is not None else 30
             )
-            if closing_duration < self.min_closing_frames:
+            if rec.state == STATE_CLOSING and closing_duration < self.min_closing_frames:
                 continue
 
             # Hotdog was CLOSING and has been invisible for >= done_delay_s -> DONE

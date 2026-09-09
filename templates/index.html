@@ -782,24 +782,6 @@
             border: 1px solid rgba(107, 114, 128, 0.3);
         }
 
-        .hotdog-status-pill.wrapped-pill {
-            background: rgba(16, 185, 129, 0.18);
-            color: #10b981;
-            border: 1px solid rgba(16, 185, 129, 0.5);
-            animation: wrappedPulse 2.5s ease-in-out infinite;
-        }
-
-        @keyframes wrappedPulse {
-            0%, 100% { box-shadow: 0 0 0px rgba(16, 185, 129, 0); }
-            50%       { box-shadow: 0 0 6px rgba(16, 185, 129, 0.6); }
-        }
-
-        .hotdog-entry.done {
-            border-left-color: #10b981;
-            background: rgba(16, 185, 129, 0.06);
-            opacity: 0.88;
-        }
-
         .hotdog-item-row {
             display: flex;
             justify-content: space-between;
@@ -848,172 +830,6 @@
             overflow-y: auto;
             font-family: 'Courier New', monospace;
         }
-
-        /* ══════════════════════════════════════════════════════════
-           Cart State Machine Status Panel
-        ════════════════════════════════════════════════════════════ */
-        .cart-status-panel {
-            background: linear-gradient(145deg, #111827, #1f2937);
-            border: 1px solid #374151;
-            border-radius: 8px;
-            padding: 14px;
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
-        }
-
-        .cart-status-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-
-        .cart-title {
-            font-size: 12px;
-            font-weight: 700;
-            color: #9ca3af;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            display: flex;
-            align-items: center;
-            gap: 6px;
-        }
-
-        .cart-state-badge {
-            font-size: 10px;
-            font-weight: 800;
-            padding: 3px 10px;
-            border-radius: 12px;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            display: inline-flex;
-            align-items: center;
-            gap: 4px;
-            transition: all 0.3s ease;
-        }
-
-        .cart-state-badge.state-EMPTY {
-            background: rgba(107, 114, 128, 0.2);
-            color: #9ca3af;
-            border: 1px solid #4b5563;
-        }
-
-        .cart-state-badge.state-BUILDING {
-            background: rgba(245, 158, 11, 0.2);
-            color: #fbbf24;
-            border: 1px solid #f59e0b;
-            box-shadow: 0 0 8px rgba(245, 158, 11, 0.4);
-        }
-
-        .cart-state-badge.state-READY {
-            background: rgba(16, 185, 129, 0.2);
-            color: #10b981;
-            border: 1px solid #10b981;
-            box-shadow: 0 0 8px rgba(16, 185, 129, 0.4);
-        }
-
-        .cart-state-badge.state-RESET {
-            background: rgba(239, 68, 68, 0.2);
-            color: #ef4444;
-            border: 1px solid #ef4444;
-            box-shadow: 0 0 8px rgba(239, 68, 68, 0.4);
-        }
-
-        .cart-state-badge.state-DONE {
-            background: rgba(34, 197, 94, 0.2);
-            color: #22c55e;
-            border: 1px solid #22c55e;
-            box-shadow: 0 0 8px rgba(34, 197, 94, 0.4);
-        }
-
-        .cart-container-info {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            font-size: 11px;
-            background: #0d1117;
-            padding: 6px 10px;
-            border-radius: 6px;
-            border: 1px solid #1f2937;
-        }
-
-        .cart-array-list {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 6px;
-            max-height: 120px;
-            overflow-y: auto;
-            padding-right: 2px;
-        }
-
-        .cart-item-pill {
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-            background: #1f2937;
-            border: 1px solid #374151;
-            border-radius: 12px;
-            padding: 3px 8px;
-            font-size: 11px;
-            color: #f3f4f6;
-            font-weight: 600;
-        }
-
-        .cart-item-seq {
-            background: #ef4444;
-            color: #ffffff;
-            font-size: 9px;
-            font-weight: 800;
-            border-radius: 50%;
-            width: 16px;
-            height: 16px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-
-        .cart-action-bar {
-            display: flex;
-            gap: 6px;
-            margin-top: 4px;
-        }
-
-        .cart-btn {
-            flex: 1;
-            padding: 5px 8px;
-            font-size: 10px;
-            font-weight: 700;
-            border-radius: 4px;
-            cursor: pointer;
-            border: none;
-            transition: all 0.2s ease;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 4px;
-        }
-
-        .cart-btn-reset {
-            background: rgba(239, 68, 68, 0.15);
-            color: #f87171;
-            border: 1px solid rgba(239, 68, 68, 0.4);
-        }
-
-        .cart-btn-reset:hover {
-            background: rgba(239, 68, 68, 0.3);
-            border-color: #ef4444;
-        }
-
-        .cart-btn-ready {
-            background: rgba(16, 185, 129, 0.15);
-            color: #34d399;
-            border: 1px solid rgba(16, 185, 129, 0.4);
-        }
-
-        .cart-btn-ready:hover {
-            background: rgba(16, 185, 129, 0.3);
-            border-color: #10b981;
-        }
     </style>
 </head>
 
@@ -1061,51 +877,7 @@
     <!-- Main Container -->
     <div class="dashboard-container">
         <!-- Left Sidebar -->
-        <div class="sidebar-left scrollable">
-
-            <!-- ════════════════════════════════════════════════════════
-                 CART STATE MACHINE PANEL (LEFT SIDEBAR)
-            ════════════════════════════════════════════════════════ -->
-            <div class="cart-status-panel" style="margin: 12px; margin-bottom: 0;">
-                <div class="cart-status-header">
-                    <span class="cart-title">🛒 Cart State Machine</span>
-                    <div style="display:flex; align-items:center; gap:6px;">
-                        <span class="cart-hotdog-badge" id="cart-hotdog-badge" style="background:#f97316; color:#fff; font-size:10px; font-weight:800; padding:2px 8px; border-radius:10px; display:none;"></span>
-                        <span class="cart-state-badge state-EMPTY" id="cart-state-badge">EMPTY</span>
-                    </div>
-                </div>
-                
-                <div class="cart-container-info">
-                    <span style="color:#9ca3af; font-weight:600;">Container / ROI</span>
-                    <span id="cart-container-text" style="color:#38bdf8; font-weight:700;">Tray #1 (Assembly)</span>
-                </div>
-
-                <div style="display:flex; flex-direction:column; gap:4px;">
-                    <div style="display:flex; justify-content:space-between; font-size:10px; color:#9ca3af; font-weight:700; text-transform:uppercase;">
-                        <span>Array Ingredients</span>
-                        <span id="cart-total-count" style="color:#f3f4f6;">0 items</span>
-                    </div>
-                    <div class="cart-array-list" id="cart-array-list">
-                        <span style="color:#6b7280; font-size:11px; font-style:italic;">No ingredients added yet</span>
-                    </div>
-                </div>
-
-                <div id="cart-counts-summary" style="display:flex; flex-wrap:wrap; gap:4px; margin-top:2px;"></div>
-            </div>
-
-            <!-- ════════════════════════════════════════════════════════
-                 HOTDOGS COMPLETED PANEL (LEFT SIDEBAR)
-            ════════════════════════════════════════════════════════ -->
-            <div class="sidebar-panel completed-hotdogs-panel" style="margin: 12px; margin-top: 8px;">
-                <div class="panel-title" style="display:flex; justify-content:space-between; align-items:center;">
-                    <span>🎓 Hotdogs Completed</span>
-                    <span class="badge" id="completed-count" style="background:#22c55e; color:#fff; font-size:11px; padding:2px 6px; border-radius:10px; font-weight:800;">0</span>
-                </div>
-                <div class="completed-list" id="completed-hotdogs-list" style="display:flex; flex-wrap:wrap; gap:6px; margin-top:8px;">
-                    <span style="color:#6b7280; font-size:11px; font-style:italic; width:100%; text-align:center; display:block;">No hotdogs completed yet</span>
-                </div>
-            </div>
-
+        <div class="sidebar-left">
             <div class="sidebar-panel kds-panel">
                 <div class="panel-title">Kitchen Display System (KDS)</div>
                 <div class="kds-tabs">
@@ -1114,13 +886,38 @@
                     <div class="kds-tab" id="tab-progress">In Progress (0)</div>
                     <div class="kds-tab" id="tab-completed">Completed (0)</div>
                 </div>
+                <!-- Live KDS screen feed, annotated by src/kds/overlay.py.
+                     Falls back to the static per-ticket screenshot when the
+                     KDS video reader is not running (kds_mode != video). -->
+                <div id="kds-video-wrap" style="margin: 0 0 10px 0; display: none;">
+                    <img id="kds-video" src="" alt="Live KDS screen"
+                         style="width: 100%; border-radius: 6px; border: 1px solid #374151; display: block;">
+                    <div id="kds-video-status" style="font-size: 9px; color: #6b7280; text-align: right; padding-top: 3px;">live KDS feed</div>
+                </div>
+                <!-- Shown while the KDS reader is starting, so the panel is
+                     never simply blank: an empty panel reads as a broken feed. -->
+                <div id="kds-waiting" style="display: none; padding: 18px 12px; text-align: center;
+                     color: #9ca3af; font-size: 11px; border: 1px dashed #374151;
+                     border-radius: 6px; margin-bottom: 10px;">
+                    Waiting for the KDS feed…
+                    <div style="color:#6b7280; font-size:10px; margin-top:5px;">
+                        Reader starting, or no ticket has appeared yet.
+                    </div>
+                </div>
+                <div id="kds-image-wrap" style="margin: 0 0 10px 0; display: none; text-align: center;">
+                    <img id="kds-image" src="" alt="KDS ticket"
+                         style="max-width: 100%; border-radius: 6px; border: 1px solid #374151;"
+                         onerror="document.getElementById('kds-image-wrap').style.display='none'">
+                </div>
                 <div class="kds-list scrollable" id="kds-queue-list">
                     <div style="color: #6b7280; font-size: 11px; padding: 12px; text-align: center;">No orders in queue</div>
                 </div>
             </div>
 
+
+
             <div class="sidebar-panel events-panel">
-                <div class="panel-title" style="padding: 14px 0 10px 0;">ingredients adding</div>
+                <div class="panel-title" style="padding: 14px 0 10px 0;">Ticket checklist</div>
                 <div class="scrollable" style="flex: 1; overflow-y: auto;" id="added-items-container">
                     <ul id="added-items-list" style="list-style: none; display: flex; flex-direction: column; gap: 8px; padding: 0;">
                         <li style="color: #6b7280; font-size: 11px; text-align: center; padding-top: 12px;">Waiting for KDS ticket...</li>
@@ -1207,28 +1004,18 @@
             </div>
 
             <!-- ════════════════════════════════════════════════════════
-                 HOTDOG TRACKER PANEL (RIGHT SIDEBAR)
+                 REQUIRED ITEMS CHECKLIST PANEL
             ════════════════════════════════════════════════════════ -->
-            <div class="hotdog-tracker-panel" style="display: flex;">
+            <div class="hotdog-tracker-panel" style="display: flex; flex-direction: column;">
                 <div class="hotdog-tracker-header">
-                    <span class="hotdog-tracker-title">🌭 Hotdog Tracker</span>
-                    <span class="hotdog-count-badge" id="hotdog-count-badge">0 detected</span>
+                    <span class="hotdog-tracker-title" style="color: #3b82f6; font-size: 13px; font-weight: 700;">📋 Checklist</span>
+                    <span class="hotdog-count-badge" id="hotdog-count-badge" style="background: rgba(59, 130, 246, 0.2); color: #60a5fa; font-weight: 700;">0 / 0</span>
                 </div>
                 <div class="hotdog-log-scroll" id="hotdog-log-container">
-                    <div style="color: #4b5563; font-size: 11px; text-align: center; padding: 8px;">
-                        No hotdogs detected yet...
+                    <div style="color: #6b7280; font-size: 11px; text-align: center; padding: 12px;">
+                        Waiting for active KDS order...
                     </div>
                 </div>
-                <!-- Compact JSON summary toggle -->
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-top:4px;">
-                    <span style="font-size:10px; color:#6b7280;">JSON Summary</span>
-                    <button id="hotdog-json-toggle" onclick="toggleHotdogJson()"
-                        style="background:#1f2937; border:1px solid #374151; color:#9ca3af;
-                               font-size:9px; padding:2px 8px; border-radius:4px; cursor:pointer;">
-                        Show
-                    </button>
-                </div>
-                <pre class="hotdog-json-pre" id="hotdog-json-pre" style="display:none;"></pre>
             </div>
 
         </div>
@@ -1247,6 +1034,8 @@
         let latestData = {};
         let currentTicketId = null;
         let selectedOrderId = null;
+        let currentOrder = null;
+        let currentTicket = null;
 
         // Persist completion alerts
         let lastCompletionTime = null;
@@ -1330,10 +1119,9 @@
 
             const orders = latestData.orders;
             const history = latestData.history || [];
-            const activeOrder = orders.find(o => o.status === 'in_progress') || orders.find(o => o.status === 'pending');
+            const activeOrder = orders.find(o => o.status === 'in_progress') || orders.find(o => o.status === 'pending') || (history.length > 0 ? history[history.length - 1] : orders[orders.length - 1]);
 
             // Resolve which order details to show
-            let currentOrder = null;
             const now = Date.now();
             const elapsed = now - lastCompletionTime;
             const showCompletedAlert = (completedOrderId && (elapsed < ALERT_PERSIST_MS));
@@ -1346,6 +1134,7 @@
             } else {
                 currentOrder = activeOrder;
             }
+            currentTicket = latestData.ticket || null;
 
             // Build placedItems set based on events
             const placedItems = new Set();
@@ -1411,19 +1200,19 @@
 
             // Update main overall status box
             const overallStatusBadge = document.getElementById('overall-status-badge');
-            if (!currentOrder || !currentOrder.ticket_id) {
+            if (!currentOrder || !currentTicket) {
                 overallStatusBadge.innerHTML = '<span>WAITING</span><span>&#9711;</span>';
                 overallStatusBadge.className = 'status pending';
             } else if (currentOrder.status === 'abandoned') {
                 overallStatusBadge.innerHTML = '<span>ABANDONED</span><span>&#10007;</span>';
                 overallStatusBadge.className = 'status fail';
-            } else if (showFinished || currentOrder.status === 'completed') {
-                if (hasMissing) {
-                    overallStatusBadge.innerHTML = '<span>WRONG ORDER</span><span>&#10007;</span>';
-                    overallStatusBadge.className = 'status fail';
-                } else {
+            } else if (currentOrder.status === 'completed' || currentOrder.status === 'finished') {
+                if (currentOrder.passed) {
                     overallStatusBadge.innerHTML = '<span>FINISHED</span><span>✓</span>';
                     overallStatusBadge.className = 'status';
+                } else {
+                    overallStatusBadge.innerHTML = '<span>WRONG ORDER</span><span>&#10007;</span>';
+                    overallStatusBadge.className = 'status fail';
                 }
             } else {
                 overallStatusBadge.innerHTML = '<span>IN PROGRESS</span><span>&#9711;</span>';
@@ -1445,87 +1234,149 @@
             tabProgress.textContent = `In Progress (${orders.filter(o => o.status === 'in_progress').length})`;
             tabCompleted.textContent = `Completed (${orders.filter(o => o.status === 'completed').length})`;
 
-            // Filter out duplicate tickets (keep last/most updated instance of each ticket ID)
-            const uniqueOrdersMap = new Map();
-            orders.forEach(o => {
-                uniqueOrdersMap.set(o.ticket_id, o);
-            });
-            const uniqueOrders = Array.from(uniqueOrdersMap.values());
+            // Show ONLY the current active working order on dashboard
+            const currentWorkingOrders = currentOrder ? [currentOrder] : [];
 
-            // Limit KDS display list to last 4 orders
-            const limitedOrders = uniqueOrders.slice(-4);
+            kdsQueueList.innerHTML = '';
+            if (currentWorkingOrders.length === 0) {
+                kdsQueueList.innerHTML = '<div style="color: #6b7280; font-size: 11px; padding: 10px; text-align: center;">No active KDS orders</div>';
+            } else {
+                currentWorkingOrders.forEach((ord) => {
+                    const isCurrentSelection = (selectedOrderId === ord.ticket_id) || (!selectedOrderId && ord.status === 'in_progress');
+                    const statusColor = ord.status === 'completed' ? '#10b981' : (ord.status === 'in_progress' ? '#3b82f6' : '#f59e0b');
+                    const statusText = (ord.status || 'PENDING').toUpperCase().replace('_', ' ');
 
-            const sortedOrders = limitedOrders.sort((a, b) => {
-                if (a.status === 'in_progress' && b.status !== 'in_progress') return -1;
-                if (b.status === 'in_progress' && a.status !== 'in_progress') return 1;
-                return 0;
-            });
-
-            sortedOrders.forEach((ord, index) => {
-                const isCurrentSelection = (selectedOrderId === ord.ticket_id) || (!selectedOrderId && ord.status === 'in_progress');
-                let isOrdCompleted = ord.status === 'completed';
-                if (isCurrentSelection) {
-                    isOrdCompleted = showFinished;
-                }
-
-                // Check if this queue order has any missing items
-                let ordHasMissing = false;
-                if (ord.expected_items) {
-                    const ordExpectedCounts = {};
-                    ord.expected_items.forEach(item => {
-                        ordExpectedCounts[item] = (ordExpectedCounts[item] || 0) + 1;
+                    // Build expected items summary
+                    const expCounts = {};
+                    (ord.expected_items || []).forEach(item => {
+                        expCounts[item] = (expCounts[item] || 0) + 1;
                     });
-                    Object.entries(ordExpectedCounts).forEach(([item, reqQty]) => {
-                        let pickedQty = 0;
-                        if (ord.status === 'completed') {
-                            pickedQty = ord.picked_counts[item] || 0;
-                        } else if (isCurrentSelection) {
-                            pickedQty = getDelayedPickedCount(item, ord);
-                        } else {
-                            pickedQty = ord.picked_counts[item] || 0;
-                        }
-                        if (pickedQty < reqQty) {
-                            ordHasMissing = true;
-                        }
-                    });
-                }
 
-            });
+                    let itemsSummaryHtml = '';
+                    const itemsEntries = Object.entries(expCounts);
+                    if (itemsEntries.length > 0) {
+                        itemsSummaryHtml = itemsEntries.map(([item, qty]) => {
+                            const nameClean = item.replace(/_/g, ' ');
+                            return `<span style="background: #1f2937; border: 1px solid #374151; border-radius: 4px; padding: 2px 6px; font-size: 10px; color: #d1d5db; display: inline-block;">${nameClean}</span>`;
+                        }).join(' ');
+                    } else {
+                        itemsSummaryHtml = '<span style="font-size: 10px; color: #6b7280;">No items specified</span>';
+                    }
 
-            // Do not show previous orders in the queue
-            kdsQueueList.innerHTML = '<div style="color: #6b7280; font-size: 11px; padding: 10px; text-align: center;">Queue hidden</div>';
+                    const card = document.createElement('div');
+                    card.style.background = isCurrentSelection ? '#1e293b' : '#111827';
+                    card.style.border = `1px solid ${isCurrentSelection ? '#3b82f6' : '#374151'}`;
+                    card.style.borderRadius = '8px';
+                    card.style.padding = '10px 12px';
+                    card.style.marginBottom = '8px';
+                    card.style.cursor = 'pointer';
 
-            // Render Detected Items (Left Sidebar)
+                    card.innerHTML = `
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                            <span style="font-weight: 700; color: #f97316; font-size: 13px;">Order #${ord.ticket_id} ${ord.hotdog_count > 1 ? '<span style="color: #9ca3af; font-size: 11px; font-weight: 600;">(' + ord.hotdog_count + ' Hotdogs)</span>' : ''}</span>
+                            <span style="background: ${statusColor}22; color: ${statusColor}; border: 1px solid ${statusColor}55; border-radius: 12px; padding: 2px 8px; font-size: 9px; font-weight: 700;">${statusText}</span>
+                        </div>
+                        <div style="font-size: 13px; color: #d1d5db; margin-top: 8px;">
+                            ${ord.shortcut || '<span style="color: #6b7280; font-style: italic; font-size: 11px;">No shortcut provided</span>'}
+                        </div>
+                    `;
+                    kdsQueueList.appendChild(card);
+                });
+            }
+
+            // Render the ticket checklist (Left Sidebar).
+            //
+            // Required quantity per item is picked + remaining: remaining_counts
+            // starts at the ticket's requirement and is decremented on every
+            // pick, so it goes negative for anything the ticket never asked
+            // for.  Showing only what was detected -- as this panel used to --
+            // hides the one case that matters most: an item the ticket needs
+            // that was never made, which simply did not appear at all.
             const addedItemsList = document.getElementById('added-items-list');
-            if (currentOrder && currentOrder.picked_counts) {
-                const pickedItems = Object.keys(currentOrder.picked_counts);
+            const muted = 'color: #6b7280; font-size: 11px; padding: 6px; text-align: center;';
+            if (currentOrder) {
+                const picked = currentOrder.picked_counts || {};
+                const remaining = currentOrder.remaining_counts || {};
+                // The requirement comes from required_counts, NOT from
+                // picked + remaining.  picked_counts is incremented from
+                // several code paths and only one of them decrements
+                // remaining_counts, so the derived form grew as the order was
+                // made and showed a doubling requirement.
+                const required = currentOrder.required_counts
+                    && Object.keys(currentOrder.required_counts).length
+                    ? currentOrder.required_counts
+                    : null;
+                const names = Array.from(new Set(
+                    Object.keys(required || remaining).concat(Object.keys(picked))
+                ));
+
+                const rows = names.map(name => {
+                    const got = picked[name] || 0;
+                    const need = required
+                        ? (required[name] || 0)
+                        : (got + (remaining[name] || 0));
+                    return {
+                        name: name,
+                        got: got,
+                        need: need,
+                        extra: need <= 0,
+                        done: need > 0 && got >= need,
+                    };
+                });
+                // Outstanding first: what still has to be made is the part the
+                // person at the station actually needs to read.
+                const rank = r => r.extra ? 2 : (r.done ? 1 : 0);
+                rows.sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
 
                 addedItemsList.innerHTML = '';
-                if (pickedItems.length === 0) {
-                    addedItemsList.innerHTML = '<li style="color: #6b7280; font-size: 11px; padding: 6px; text-align: center;">No items detected yet</li>';
+                if (!rows.length) {
+                    addedItemsList.innerHTML =
+                        '<li style="' + muted + '">No tracked ingredients on this ticket</li>';
                 } else {
-                    pickedItems.forEach(item => {
-                        const pickedQty = currentOrder.picked_counts[item];
+                    rows.forEach(r => {
+                        let border, mark, markColour, qty;
+                        if (r.extra) {
+                            border = 'rgba(239, 68, 68, 0.45)';
+                            mark = '!';
+                            markColour = '#ef4444';
+                            qty = '×' + r.got + ' not on ticket';
+                        } else if (r.done) {
+                            border = 'rgba(16, 185, 129, 0.3)';
+                            mark = '✓';
+                            markColour = '#10b981';
+                            qty = '×' + r.got + '/' + r.need;
+                        } else {
+                            border = 'rgba(148, 163, 184, 0.3)';
+                            mark = '○';
+                            markColour = '#94a3b8';
+                            qty = '×' + r.got + '/' + r.need;
+                        }
 
                         const li = document.createElement('li');
                         li.style.background = '#1f2937';
-                        li.style.border = '1px solid rgba(16, 185, 129, 0.3)';
+                        li.style.border = '1px solid ' + border;
                         li.style.borderRadius = '6px';
                         li.style.padding = '8px 12px';
                         li.style.display = 'flex';
                         li.style.justifyContent = 'space-between';
                         li.style.alignItems = 'center';
                         li.style.fontSize = '12px';
-                        
-                        li.innerHTML = `
-                            <span style="color: #fff; font-weight: 500;">${item}</span>
-                            <span style="color: #10b981; font-weight: 700;">✓ x${pickedQty}</span>
-                        `;
+                        li.style.opacity = r.done ? '0.75' : '1';
+
+                        li.innerHTML =
+                            '<span style="color: ' + (r.done ? '#9ca3af' : '#fff') +
+                            '; font-weight: 500;">' + escapeHtml(r.name) + '</span>' +
+                            '<div style="display: flex; align-items: center; gap: 8px;">' +
+                            '<span style="background: #374151; color: #d1d5db; padding: 2px 6px;' +
+                            ' border-radius: 4px; font-size: 10px; font-weight: 600;">' + qty + '</span>' +
+                            '<span style="color: ' + markColour + '; font-weight: 700;">' + mark + '</span>' +
+                            '</div>';
                         addedItemsList.appendChild(li);
                     });
                 }
             } else {
-                addedItemsList.innerHTML = '<li style="color: #6b7280; font-size: 11px; padding: 6px; text-align: center;">Waiting for detections...</li>';
+                addedItemsList.innerHTML =
+                    '<li style="' + muted + '">Waiting for KDS ticket...</li>';
             }
 
             // Calculate Performance Metrics from History (full history)
@@ -1608,10 +1459,81 @@
             }
         }
 
+        function escapeHtml(v) {
+            return String(v == null ? '' : v).replace(/[&<>"']/g,
+                ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+        }
+
+        // ---- KDS panel media -------------------------------------------------
+        // Shows the live annotated KDS screen when the KDS video reader is
+        // running (kds_mode: video); otherwise falls back to the static
+        // per-ticket screenshot that mock mode has always used.
+        let _kdsVideoStarted = false;
+        function renderKdsMedia(data) {
+            const vidWrap = document.getElementById('kds-video-wrap');
+            const imgWrap = document.getElementById('kds-image-wrap');
+            const waiting = document.getElementById('kds-waiting');
+            const list = document.getElementById('kds-queue-list');
+            const tabs = document.querySelector('.kds-tabs');
+            if (!vidWrap || !imgWrap) return;
+
+            const kdsConfigured = !!(data.kds && data.kds.counts);
+
+            if (data.kds_live) {
+                // The live feed already shows every ticket, its queue position
+                // and its progress, so the duplicated status cards are hidden.
+                if (waiting) waiting.style.display = 'none';
+                imgWrap.style.display = 'none';
+                vidWrap.style.display = '';
+                if (list) list.style.display = 'none';
+                if (tabs) tabs.style.display = 'none';
+                if (!_kdsVideoStarted) {
+                    // Assigned once: an MJPEG src must not be reset per frame.
+                    document.getElementById('kds-video').src = '/kds_video';
+                    _kdsVideoStarted = true;
+                }
+                const st = document.getElementById('kds-video-status');
+                if (st) {
+                    const c = (data.kds && data.kds.counts) || {};
+                    const active = ((data.kds && data.kds.queue) || [])
+                        .find(g => g.queue_label === 'ACTIVE');
+                    st.textContent = active
+                        ? `live KDS feed — ACTIVE ${active.ticket_id}  ${active.detected_total}/${active.expected_total} hotdogs`
+                        : `live KDS feed — ${c.queued || 0} queued, ${c.completed || 0} ok, ${c.wrong || 0} wrong`;
+                }
+                return;
+            }
+
+            vidWrap.style.display = 'none';
+
+            // Reader is configured but no frame has arrived yet: say so rather
+            // than leaving an empty panel, which reads as a broken feed.
+            if (kdsConfigured) {
+                imgWrap.style.display = 'none';
+                if (waiting) waiting.style.display = '';
+                return;
+            }
+
+            // Mock mode: the per-ticket screenshot, and the cards stay visible.
+            if (waiting) waiting.style.display = 'none';
+            if (list) list.style.display = '';
+            if (tabs) tabs.style.display = '';
+            const tid = data.ticket && data.ticket.ticket_id;
+            if (tid) {
+                const img = document.getElementById('kds-image');
+                const next = '/kds_image/' + encodeURIComponent(tid);
+                if (img.getAttribute('src') !== next) img.src = next;
+                imgWrap.style.display = '';
+            } else {
+                imgWrap.style.display = 'none';
+            }
+        }
+
         const ws = new WebSocket(`ws://${location.host}/ws`);
         ws.onmessage = (event) => {
             const data = JSON.parse(event.data);
             latestData = data;
+            try { renderKdsMedia(data); } catch (err) { console.error('KDS media render failed', err); }
 
             const order = data.order || {};
             const pickedCounts = order.picked_counts || {};
@@ -1668,8 +1590,8 @@
                 }
             }
 
-            renderUI();
-        };
+            renderRequiredItemsChecklist(currentOrder, currentTicket);
+        }
 
         // Periodically refresh the UI to update the countdowns/timestamps
         setInterval(renderUI, 100);
@@ -1688,248 +1610,70 @@
             btn.textContent = _hotdogJsonVisible ? 'Hide' : 'Show';
         }
 
-        function renderHotdogTracker(hotdogLog, wrappingDoneIds) {
+        function renderRequiredItemsChecklist(ord, tkt) {
             const container = document.getElementById('hotdog-log-container');
             const badge     = document.getElementById('hotdog-count-badge');
-            const jsonPre   = document.getElementById('hotdog-json-pre');
-            const doneSet   = new Set((wrappingDoneIds || []).flatMap(x => [x, String(x), Number(x)]));
+            if (!container || !badge) return;
 
-            if (!hotdogLog || Object.keys(hotdogLog).length === 0) {
-                badge.textContent = '0 detected';
-                container.innerHTML = '<div style="color:#4b5563;font-size:11px;text-align:center;padding:8px;">No hotdogs detected yet...</div>';
-                jsonPre.textContent = '{}';
+            const targetOrder = ord || (typeof currentOrder !== 'undefined' ? currentOrder : null);
+            if (!targetOrder) {
+                badge.textContent = '0 / 0';
+                container.innerHTML = '<div style="color:#6b7280;font-size:11px;text-align:center;padding:12px;">Waiting for active KDS ticket...</div>';
                 return;
             }
 
-            const entries = Object.values(hotdogLog).sort((a, b) => {
-                const numA = (a.track_id || 0);
-                const numB = (b.track_id || 0);
-                return numA - numB;
+            const expCounts = {};
+            (targetOrder.expected_items || []).forEach(item => {
+                expCounts[item] = (expCounts[item] || 0) + 1;
             });
-            badge.textContent = `${entries.length} detected`;
-
-            let html = '';
-            entries.forEach(rec => {
-                const isDone     = doneSet.has(rec.track_id) || 
-                                   doneSet.has(String(rec.track_id)) || 
-                                   doneSet.has(Number(rec.track_id)) ||
-                                   doneSet.has(rec.hotdog_id) || 
-                                   doneSet.has(String(rec.hotdog_id)) || 
-                                   doneSet.has(Number(rec.hotdog_id)) ||
-                                   doneSet.has(rec.numeric_tid);
-                const isActive   = (rec.active || rec.is_coasting) && !isDone;
-
-                let statusCls, statusLabel, entryCls;
-                if (isDone) {
-                    statusCls   = 'wrapped-pill';
-                    statusLabel = '✓ WRAPPED';
-                    entryCls    = 'hotdog-entry done';
-                } else if (isActive) {
-                    statusCls   = 'active-pill';
-                    statusLabel = 'ACTIVE';
-                    entryCls    = 'hotdog-entry active';
-                } else {
-                    statusCls   = 'idle-pill';
-                    statusLabel = 'IDLE';
-                    entryCls    = 'hotdog-entry';
-                }
-
-                // ── Item-count summary grid ──────────────────────────────────
-                const counts = rec.item_counts || {};
-                const countKeys = Object.keys(counts);
-                const totalToppings = countKeys.reduce((s, k) => s + counts[k], 0);
-
-                let countGridHtml = '';
-                if (countKeys.length > 0) {
-                    // Sort: most-applied first
-                    const sorted = countKeys.slice().sort((a, b) => counts[b] - counts[a]);
-                    countGridHtml = `
-                        <div style="display:flex;flex-wrap:wrap;gap:4px;margin:6px 0 2px;">
-                            ${sorted.map(name => {
-                                const n = counts[name];
-                                const label = name.replace(/_/g, ' ');
-                                const badgeColor = n > 1 ? '#f59e0b' : '#22c55e';
-                                return `<span style="
-                                    display:inline-flex;align-items:center;gap:3px;
-                                    background:#1f2937;border:1px solid #374151;
-                                    border-radius:12px;padding:2px 8px;
-                                    font-size:10px;color:#d1d5db;white-space:nowrap;">
-                                    ${label}
-                                    <span style="background:${badgeColor};color:#000;
-                                        border-radius:8px;padding:1px 5px;font-weight:700;
-                                        font-size:9px;">×${n}</span>
-                                </span>`;
-                            }).join('')}
-                        </div>
-                        <div style="font-size:10px;color:#6b7280;margin-bottom:4px;">
-                            ${totalToppings} application${totalToppings !== 1 ? 's' : ''} total
-                            &nbsp;|&nbsp; ${countKeys.length} unique item${countKeys.length !== 1 ? 's' : ''}
-                        </div>`;
-                } else {
-                    countGridHtml = '<span style="color:#4b5563;font-size:11px;">No items detected yet</span>';
-                }
-
-                // ── Full timeline (collapsible) ──────────────────────────────
-                let timelineHtml = '';
-                if (rec.items_added && rec.items_added.length > 0) {
-                    timelineHtml = rec.items_added.map(it => {
-                        return `<div class="hotdog-item-row">
-                            <span class="hotdog-item-name">${it.item.replace(/_/g, ' ')}</span>
-                            <span class="hotdog-item-time">${it.time_str || ''}</span>
-                        </div>`;
-                    }).join('');
-                }
-
-                // ── Wrapped completion banner ────────────────────────────────
-                const wrappedBanner = isDone ? `
-                    <div style="
-                        margin-top:6px;padding:5px 8px;
-                        background:rgba(16,185,129,0.12);border:1px solid rgba(16,185,129,0.35);
-                        border-radius:5px;font-size:10px;color:#10b981;font-weight:700;
-                        display:flex;align-items:center;gap:6px;
-                    ">
-                        <span style="font-size:13px;">✅</span> Order completed — hotdog fully wrapped
-                    </div>` : '';
-
-                const hid = rec.hotdog_id || rec.track_id;
-                const orderBadge = rec.order_id ? `<span style="font-size:10px;color:#6b7280;margin-left:6px;font-weight:600;">[${rec.order_id}]</span>` : '';
-                html += `
-                    <div class="${entryCls}">
-                        <div class="hotdog-entry-header">
-                            <span class="hotdog-entry-id" style="font-weight:800;color:#f97316;font-size:13px;">🌭 hotdog_${hid} ${orderBadge}</span>
-                            <span class="hotdog-status-pill ${statusCls}">${statusLabel}</span>
-                        </div>
-                        ${countGridHtml}
-                        ${timelineHtml}
-                        ${wrappedBanner}
-                    </div>`;
-            });
-
-            container.innerHTML = html;
-
-            // Build compact JSON summary
-            const summary = {};
-            entries.forEach((rec, i) => {
-                summary[`order${i + 1}`] = {
-                    item_counts: rec.item_counts || {},
-                    item_names:  rec.item_names,
-                    wrapped:     doneSet.has(rec.track_id),
-                };
-            });
-            jsonPre.textContent = JSON.stringify(summary, null, 2);
-        }
-
-
-        /* ══════════════════════════════════════════════════════════
-           Cart State Machine Rendering & Actions
-        ════════════════════════════════════════════════════════════ */
-        function renderCartStatus(cart) {
-            if (!cart) return;
-            const badge = document.getElementById('cart-state-badge');
-            const hotdogBadge = document.getElementById('cart-hotdog-badge');
-            const containerText = document.getElementById('cart-container-text');
-            const listContainer = document.getElementById('cart-array-list');
-            const totalCountEl = document.getElementById('cart-total-count');
-            const countsContainer = document.getElementById('cart-counts-summary');
-
-            // 1. Hotdog ID & State Badge
-            if (hotdogBadge) {
-                if (cart.active_hotdog_id) {
-                    hotdogBadge.textContent = cart.active_hotdog_id;
-                    hotdogBadge.style.display = 'inline-block';
-                } else {
-                    hotdogBadge.style.display = 'none';
-                }
+            const hCount = (tkt && tkt.total_hotdogs) || targetOrder.hotdog_count || expCounts['hot-dog'] || 1;
+            if (!expCounts['hot-dog'] || expCounts['hot-dog'] < hCount) {
+                expCounts['hot-dog'] = hCount;
             }
-            const stateVal = cart.state || 'EMPTY';
-            badge.textContent = stateVal;
-            badge.className = `cart-state-badge state-${stateVal}`;
 
-            // 2. Container Info
-            containerText.textContent = `${cart.container_id || 'Tray #1'} (Assembly)`;
-
-            // 3. Array-based ingredients
-            const items = cart.ingredients || [];
-            totalCountEl.textContent = `${items.length} item${items.length !== 1 ? 's' : ''}`;
+            const pickedCounts = targetOrder.picked_counts || {};
+            const items = Object.keys(expCounts);
 
             if (items.length === 0) {
-                listContainer.innerHTML = '<span style="color:#6b7280; font-size:11px; font-style:italic;">No ingredients in cart (EMPTY)</span>';
-            } else {
-                listContainer.innerHTML = items.map((name, idx) => `
-                    <div class="cart-item-pill">
-                        <span class="cart-item-seq">${idx + 1}</span>
-                        <span>${name.replace(/_/g, ' ')}</span>
-                    </div>
-                `).join('');
+                badge.textContent = '0 / 0';
+                container.innerHTML = '<div style="color:#6b7280;font-size:11px;text-align:center;padding:12px;">No items specified in ticket</div>';
+                return;
             }
 
-            // 4. Counts Summary
-            const counts = cart.counts || {};
-            const countKeys = Object.keys(counts);
-            if (countKeys.length > 0) {
-                countsContainer.innerHTML = countKeys.map(k => `
-                    <span style="background:#0d1117; border:1px solid #1f2937; padding:2px 8px; border-radius:10px; font-size:10px; color:#d1d5db;">
-                        ${k.replace(/_/g, ' ')} <strong style="color:#38bdf8;">×${counts[k]}</strong>
-                    </span>
-                `).join('');
-            } else {
-                countsContainer.innerHTML = '';
-            }
+            let satisfiedCount = 0;
+            let html = '';
 
-            // 5. Completed Hotdogs Panel update
-            const completedList = document.getElementById('completed-hotdogs-list');
-            const completedCount = document.getElementById('completed-count');
-            const completedHotdogs = cart.completed_hotdogs || [];
-            if (completedCount) {
-                completedCount.textContent = completedHotdogs.length;
-            }
-            if (completedList) {
-                if (completedHotdogs.length === 0) {
-                    completedList.innerHTML = '<span style="color:#6b7280; font-size:11px; font-style:italic; width:100%; text-align:center; display:block; padding:4px 0;">No hotdogs completed yet</span>';
-                } else {
-                    completedList.innerHTML = completedHotdogs.map(id => `
-                        <div style="background:rgba(34, 197, 94, 0.15); border:1px solid rgba(34, 197, 94, 0.4); color:#4ade80; font-weight:800; font-size:11px; padding:3px 8px; border-radius:10px; display:inline-flex; align-items:center; gap:4px;">
-                            <span>🌭</span> <span>${id}</span>
+            items.forEach(item => {
+                const reqQty = expCounts[item];
+                const obsQty = pickedCounts[item] || 0;
+                const isSatisfied = obsQty >= reqQty;
+                if (isSatisfied) satisfiedCount++;
+
+                const statusColor = isSatisfied ? '#10b981' : '#f59e0b';
+                const statusIcon = isSatisfied ? '✓' : '◯';
+                const itemNameClean = item.replace(/_/g, ' ').toUpperCase();
+
+                html += `
+                    <div style="background: ${isSatisfied ? 'rgba(16, 185, 129, 0.1)' : '#111827'}; border: 1px solid ${isSatisfied ? '#10b981' : '#374151'}; border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center;">
+                        <div>
+                            <div style="font-weight: 700; color: ${isSatisfied ? '#10b981' : '#f3f4f6'}; font-size: 12px;">${itemNameClean}</div>
+                            ${item === 'hot-dog' ? `<div style="font-size: 11px; color: #9ca3af; margin-top: 2px;">Required: ${reqQty} | Added: ${obsQty}</div>` : ''}
                         </div>
-                    `).join('');
-                }
-            }
+                        <span style="font-weight: 800; font-size: 14px; color: ${statusColor};">${statusIcon}</span>
+                    </div>
+                `;
+            });
+
+            badge.textContent = `${satisfiedCount} / ${items.length} satisfied`;
+            container.innerHTML = html;
         }
 
-        function triggerCartReset() {
-            fetch('/api/cart/reset', { method: 'POST' })
-                .then(res => res.json())
-                .then(data => {
-                    if (data.cart) renderCartStatus(data.cart);
-                })
-                .catch(err => console.error('Cart reset error:', err));
-        }
-
-        function triggerCartReady() {
-            fetch('/api/cart/event', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ event_type: 'PREP_COMPLETE' })
-            })
-            .then(res => res.json())
-            .then(data => {
-                if (data.cart) renderCartStatus(data.cart);
-            })
-            .catch(err => console.error('Cart event error:', err));
-        }
-
-        // Patch the existing WebSocket onmessage to also call renderHotdogTracker and renderCartStatus
+        // Call renderRequiredItemsChecklist whenever websocket updates
         const _origWsOnMessage = ws.onmessage;
         ws.onmessage = (event) => {
             if (_origWsOnMessage) _origWsOnMessage(event);
             try {
-                const data = JSON.parse(event.data);
-                if (data.hotdog_log !== undefined) {
-                    renderHotdogTracker(data.hotdog_log, data.wrapping_done_ids || []);
-                }
-                if (data.cart !== undefined) {
-                    renderCartStatus(data.cart);
-                }
+                renderRequiredItemsChecklist();
             } catch(e) {}
         };
     </script>

@@ -375,3 +375,19 @@ class TestWrappingStateMachine:
         sm.full_reset()
         assert sm._states == {}
         assert sm.done_ids == set()
+
+    def test_clamshell_wrapper_disappearance_done(self):
+        """A hotdog in reg_clamshell/wrapper that completely disappears should transition to DONE."""
+        sm = self._sm(done_delay_s=1.0)
+        hd = [_hd(1, 0, 0, 100, 100)]
+        clamshell = [_Det(track_id=-1, bbox=(0, 0, 100, 100), class_name="reg_clamshell")]
+        # Hotdog touches clamshell for 1 frame
+        sm.update(0, 0.0, hd, clamshell)
+        # Hotdog disappears completely
+        events = []
+        for i in range(1, 60):
+            ev = sm.update(i, i / 30.0, [], [])
+            events.extend(ev)
+        assert 1 in sm.done_ids
+        assert any(e["event"] == "done" and e["hotdog_tid"] == 1 for e in events)
+

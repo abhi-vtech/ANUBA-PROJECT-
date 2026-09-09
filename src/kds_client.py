@@ -5,7 +5,7 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import List, Optional, Set
 
-from src.schemas import Ticket
+from src.schemas import Ticket, LineItem
 
 
 class KDSClient(ABC):
@@ -50,13 +50,47 @@ class MockKDSClient(KDSClient):
         else:
             raw_tickets = data
 
-        self._tickets = [
-            Ticket(
+        self._tickets = []
+        for t in raw_tickets:
+            line_items = []
+            for li in t.get("line_items", []):
+                line_items.append(LineItem(
+                    variant=li["variant"],
+                    count=li["count"],
+                    items=li["items"]
+                ))
+            
+            hotdog_specs = {}
+            if "hotdog_specs" in t and isinstance(t["hotdog_specs"], dict):
+                hotdog_specs.update(t["hotdog_specs"])
+            for k, v in t.items():
+                if k.startswith("hotdog") and k not in ("total_hotdogs", "hotdog_specs"):
+                    if isinstance(v, list):
+                        item_counts = {}
+                        for item in v:
+                            item_counts[item] = item_counts.get(item, 0) + 1
+                        hotdog_specs[k] = item_counts
+                    elif isinstance(v, dict):
+                        hotdog_specs[k] = v
+            
+            if hotdog_specs and not line_items:
+                for hd_name, items_dict in hotdog_specs.items():
+                    line_items.append(LineItem(variant=hd_name, count=1, items=items_dict))
+                
+            total_hotdogs = t.get("total_hotdogs", len(hotdog_specs) if hotdog_specs else 1)
+
+
+            expected_items = t.get("expected_items", [])
+
+            self._tickets.append(Ticket(
                 ticket_id=t["ticket_id"],
-                expected_items=t["expected_items"],
-            )
-            for t in raw_tickets
-        ]
+                shortcut=t.get("shortcut", ""),
+                total_hotdogs=total_hotdogs,
+                line_items=line_items,
+                hotdog_specs=hotdog_specs,
+                expected_items=expected_items,
+            ))
+
         self._last_index = -1
 
     def get_next_ticket(self) -> Optional[Ticket]:

@@ -30,6 +30,14 @@ if _cart_path.exists():
 
 cart_machine = CartStateMachine(container_id="Assembly Tray #1", persistence_path="config/cart_state.json", load_from_disk=False)
 
+@app.get("/kds_image/{ticket_id}")
+def get_kds_image(ticket_id: str):
+    import os
+    img_path_base = resource(os.path.join("videos", "kds_images", ticket_id))
+    for ext in [".png", ".jpg", ".jpeg", ".PNG", ".JPG", ".JPEG"]:
+        if os.path.exists(img_path_base + ext):
+            return FileResponse(img_path_base + ext)
+    return {"error": "Image not found"}
 
 app.add_middleware(
     CORSMiddleware,
@@ -52,8 +60,11 @@ _hotdog_log: dict = {}
 _wrapping_done_ids: list = []   # track_ids permanently wrapped (DONE state)
 _fps: float = 0.0
 _last_frame_time: float = 0.0
-_frame_lock = asyncio.Lock()
 _exited_hotdogs: list = []
+# Latest KDS FIFO snapshot (empty unless kds_mode: video is active).
+_kds_state: dict = {}
+# Latest annotated KDS screen frame, JPEG-encoded, for the /kds_video stream.
+_latest_kds_frame: Optional[bytes] = None
 
 
 def record_hotdog_exit(exited_ids: list):
@@ -92,6 +103,42 @@ def load_zones():
                 zone["color"] = DEFAULT_ZONE_COLORS[i % len(DEFAULT_ZONE_COLORS)]
         return zones
     return []
+
+
+def set_kds_state(state: dict) -> None:
+    """Publish the KDS FIFO queue / timeline for the live dashboard.
+
+    Called once per frame by src/main.py when the KDS video reader is active.
+    The payload is the output of TicketManager.dashboard_state() plus the
+    event timeline; see src/kds/fifo_queue.py.
+    """
+    global _kds_state
+    _kds_state = state or {}
+
+
+def get_kds_state() -> dict:
+    return _kds_state
+
+
+def update_kds_frame(frame) -> None:
+    """Publish the latest annotated KDS screen frame for /kds_video.
+
+    Called from the KDS reader thread.  Encoding here (rather than in the
+    route) keeps the stream cheap when several browsers are watching.
+    """
+    global _latest_kds_frame
+    if frame is None:
+        return
+    try:
+        ok, buf = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
+        if ok:
+            _latest_kds_frame = buf.tobytes()
+    except Exception:
+        pass
+
+
+def has_kds_frame() -> bool:
+    return _latest_kds_frame is not None
 
 
 def update_frame_data(
@@ -317,7 +364,15 @@ async def api_stats():
         "history": [state_machine._order_record(o) for o in state_machine.history] if state_machine else [],
         "fps": _fps,
         "cart": get_cart_data(),
+        "kds": _kds_state,
+        "kds_live": _latest_kds_frame is not None,
     }
+
+
+@app.get("/api/kds")
+def api_kds():
+    """KDS FIFO queue, completed orders, warnings and the event timeline."""
+    return _kds_state
 
 
 @app.get("/api/hotdog_log")
@@ -329,13 +384,42 @@ async def api_hotdog_log():
     }
 
 
+_placeholder_cache: dict = {}
+
+
+def _status_frame(message: str, width: int = 1280, height: int = 720) -> bytes:
+    """A dark JPEG carrying a status line.
+
+    The stream used to yield nothing at all until the first real frame, so the
+    <img> stayed empty and the dashboard looked broken while the model was
+    still loading.  Sending a captioned frame instead says what it is waiting
+    for.
+    """
+    cached = _placeholder_cache.get(message)
+    if cached is not None:
+        return cached
+    canvas = np.full((height, width, 3), 18, np.uint8)
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    (tw, th), _ = cv2.getTextSize(message, font, 0.9, 2)
+    cv2.putText(
+        canvas, message, ((width - tw) // 2, (height + th) // 2),
+        font, 0.9, (200, 200, 200), 2, cv2.LINE_AA,
+    )
+    ok, buf = cv2.imencode(".jpg", canvas)
+    frame = buf.tobytes() if ok else b""
+    _placeholder_cache[message] = frame
+    return frame
+
+
 async def mjpeg_generator():
     """Generate MJPEG stream."""
     while True:
-        if _latest_frame is not None:
-            yield (
-                b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + _latest_frame + b"\r\n"
-            )
+        frame = _latest_frame
+        if frame is None:
+            frame = _status_frame("Starting up - loading model, waiting for video")
+        yield (
+                b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + frame + b"\r\n"
+        )
         await asyncio.sleep(0.033)  # ~30 FPS
 
 
@@ -344,6 +428,26 @@ async def video_feed():
     """MJPEG video streaming endpoint."""
     return StreamingResponse(
         mjpeg_generator(), media_type="multipart/x-mixed-replace; boundary=frame"
+    )
+
+
+# CRLF separator for the multipart stream.
+_MJPEG_BOUNDARY = b"--frame\r\nContent-Type: image/jpeg\r\n\r\n"
+
+
+async def kds_mjpeg_generator():
+    """Generate the MJPEG stream of the KDS screen."""
+    while True:
+        if _latest_kds_frame is not None:
+            yield _MJPEG_BOUNDARY + _latest_kds_frame + b"\r\n"
+        await asyncio.sleep(0.1)  # the KDS screen changes slowly; ~10 FPS
+
+
+@app.get("/kds_video")
+async def kds_video_feed():
+    """MJPEG stream of the live KDS screen, annotated with ticket state."""
+    return StreamingResponse(
+        kds_mjpeg_generator(), media_type="multipart/x-mixed-replace; boundary=frame"
     )
 
 
@@ -370,6 +474,8 @@ async def websocket_endpoint(websocket: WebSocket):
                     "hotdog_log": _hotdog_log,
                     "wrapping_done_ids": _wrapping_done_ids,
                     "cart": get_cart_data(),
+        "kds": _kds_state,
+        "kds_live": _latest_kds_frame is not None,
                 }
             )
             await asyncio.sleep(0.1)
