@@ -15,6 +15,7 @@ manager owns the lifecycle.
 
 from __future__ import annotations
 
+import os
 import logging
 import time
 from typing import Callable, Dict, List, Optional
@@ -58,7 +59,14 @@ class KdsMonitor:
         self.manager = manager or TicketManager()
 
         ocr_cfg = self.config.get("ocr", {}) or {}
-        self.frame_stride = max(1, int(ocr_cfg.get("frame_stride", 3)))
+        # KDS_OCR_STRIDE overrides ocr.frame_stride for one run.  OCR cost
+        # scales with the number of cards on screen, so a busy board can push
+        # the reader behind the production video (it warns when it does) --
+        # raising the stride is the documented fix and this makes it settable
+        # without editing the shipped config.
+        self.frame_stride = max(
+            1, int(os.environ.get("KDS_OCR_STRIDE") or ocr_cfg.get("frame_stride", 3))
+        )
         sync_cfg = self.config.get("sync", {}) or {}
         self.kds_offset_s = float(sync_cfg.get("kds_offset_s", 0.0))
 
@@ -182,12 +190,18 @@ class KdsMonitor:
                     )
 
         elif event.type is KdsEventType.TICKET_UPDATED:
-            if event.snapshot is not None and self.manager.update_content(
-                ticket_id, event.snapshot.hotdogs, now
-            ):
-                self.timeline.add(
-                    "ticket_updated", "Ticket %s content updated" % ticket_id, ticket_id, now
-                )
+            # The requirement is fixed when the order group is created and is
+            # never rewritten afterwards.  A later reading of the card is still
+            # recorded, because the screen genuinely changed and that is worth
+            # seeing on the timeline -- but it cannot move expected_total, so an
+            # order is always judged against the ticket it entered with.
+            self.timeline.add(
+                "ticket_updated",
+                "Ticket %s changed on the KDS (requirement frozen at creation, "
+                "not applied)" % ticket_id,
+                ticket_id,
+                now,
+            )
 
         elif event.type is KdsEventType.TICKET_DISAPPEARED:
             self.timeline.add(

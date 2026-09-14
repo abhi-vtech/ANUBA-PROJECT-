@@ -82,3 +82,11 @@ _removed_*/
 # Model weights ARE tracked: the pipeline cannot run without them and the file
 # is 43 MB, comfortably under GitHub's 100 MB per-file limit.
 !rf_trained/*.pt
+
+# Local backups and run artifacts (added 2026-09-12)
+_archive/
+*.bak
+*.bak.*
+output/recordings/
+output/frames.jsonl
+*.jsonl

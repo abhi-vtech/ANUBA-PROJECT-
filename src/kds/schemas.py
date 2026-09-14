@@ -4,7 +4,7 @@ These are deliberately separate from ``src/schemas.py``: that module describes
 the *production* side (Detection, Action, Order) and is consumed by the
 existing pipeline.  This module describes the *KDS* side.  The bridge between
 them is :meth:`OrderGroup.to_ticket`, which produces a plain
-``src.schemas.Ticket`` so ``OrderStateMachine`` keeps working untouched.
+``src.domain.schemas.Ticket`` so ``OrderStateMachine`` keeps working untouched.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Dict, List, Optional, Tuple
 
-from src.schemas import LineItem, Ticket
+from src.domain.schemas import LineItem, Ticket
 
 BBox = Tuple[int, int, int, int]
 
@@ -351,7 +351,7 @@ class OrderGroup:
         return [(h.item, a) for h in self.hotdogs for a in h.addons]
 
     def to_ticket(self) -> Ticket:
-        """Adapt to the existing ``src.schemas.Ticket``.
+        """Adapt to the existing ``src.domain.schemas.Ticket``.
 
         Consumed by ``OrderStateMachine`` / ``BatchOrderValidator``.  Each
         expected hotdog becomes one ``hotdog<N>`` spec whose ingredients are

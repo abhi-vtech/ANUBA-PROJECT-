@@ -22,6 +22,7 @@ import logging
 import os
 import shutil
 import time
+from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, Optional, Tuple
@@ -58,6 +59,7 @@ class FailureRecorder:
         max_seconds: float = 900.0,
         max_concurrent: int = 6,
         enabled: bool = True,
+        preroll_s: float = 20.0,
     ):
         self.output_dir = Path(output_dir)
         self.fps = max(1.0, float(fps))
@@ -65,6 +67,14 @@ class FailureRecorder:
         self.max_concurrent = int(max_concurrent)
         self.enabled = bool(enabled)
         self._clips: Dict[str, _Clip] = {}
+        # Pre-roll: a card is on the KDS for several seconds before stability
+        # confirms it, and the worker has usually started the order in that
+        # window -- fetching cheese, most of all.  A clip that opens at ticket
+        # creation therefore opens after the part worth watching.  Frames are
+        # held JPEG-encoded: 20s of raw 1280x720 is ~550MB, the same reason
+        # this class writes clips to disk rather than buffering them.
+        self.preroll_frames = max(0, int(self.fps * float(preroll_s)))
+        self._preroll: deque = deque(maxlen=self.preroll_frames or 1)
         # In-progress clips live INSIDE the output directory, not in the system
         # temp dir: keeping a failure means renaming the file, and a rename
         # cannot cross drives (output/ is often on a different disk from %TEMP%).
@@ -78,6 +88,39 @@ class FailureRecorder:
                 self.enabled = False
         self.kept = 0
         self.discarded = 0
+
+    # ---------------------------------------------------------------- preroll
+
+    def observe(self, frame: np.ndarray) -> None:
+        """Hold one frame in the pre-roll buffer.
+
+        Call this on every frame while anything is on the KDS, whether or not a
+        ticket is recording.  :meth:`start` flushes the buffer into the new
+        clip, so the recording begins when the card appeared rather than when
+        the ticket was confirmed.
+        """
+        if not self.enabled or self.preroll_frames <= 0:
+            return
+        if frame is None or frame.size == 0:
+            return
+        ok, encoded = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
+        if ok:
+            self._preroll.append(encoded)
+
+    def _flush_preroll(self, clip: "_Clip") -> int:
+        """Write the buffered pre-ticket frames into a clip, oldest first."""
+        width, height = clip.size
+        written = 0
+        for encoded in list(self._preroll):
+            frame = cv2.imdecode(encoded, cv2.IMREAD_COLOR)
+            if frame is None:
+                continue
+            if (frame.shape[1], frame.shape[0]) != (width, height):
+                frame = cv2.resize(frame, (width, height))
+            clip.writer.write(frame)
+            written += 1
+        clip.frames += written
+        return written
 
     # ------------------------------------------------------------------ start
 
@@ -104,14 +147,20 @@ class FailureRecorder:
         if not writer.isOpened():
             logger.error("Could not open a video writer for ticket %s", ticket_id)
             return
-        self._clips[ticket_id] = _Clip(
+        clip = _Clip(
             ticket_id=ticket_id,
             writer=writer,
             path=path,
             size=(width, height),
             started_at=time.monotonic(),
         )
-        logger.info("Recording ticket %s -> %s", ticket_id, path.name)
+        self._clips[ticket_id] = clip
+        preroll = self._flush_preroll(clip)
+        logger.info(
+            "Recording ticket %s -> %s (%.1fs of pre-roll from before it was "
+            "confirmed)",
+            ticket_id, path.name, preroll / self.fps,
+        )
 
     # ------------------------------------------------------------------ write
 

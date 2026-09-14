@@ -1,0 +1,16 @@
+black_clamshell
+burger_bun
+burger_bun_with_toppings
+closed_reg_clamshell
+french_fries
+hand
+hot-dog
+ketchup_sauce
+knife
+reg_clamshell
+scoop
+tongs
+white_clamshell
+wrapped
+wrapper
+yellow_mustard_sauce

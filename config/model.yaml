@@ -29,6 +29,14 @@ dedup_distance: 0.05
 frame_width: 1280
 frame_height: 720
 fps: 30
+# ── Jetson / GPU inference ───────────────────────────────────────────────────
+# half: FP16 inference.  Roughly doubles throughput on Orin's Ampere tensor
+# cores and is ignored automatically when CUDA is unavailable (torch has no
+# fp16 CPU kernels for most ops).  Override per run with HALF=false.
+half: true
+# imgsz: inference resolution fed to YOLO.  640 is the model's native training
+# size; lower it (e.g. 480) to trade accuracy for FPS on a loaded Jetson.
+imgsz: 640
 confidence_threshold: 0.5
 hotdog_conf_threshold: 0.55
 wrapping_conf_threshold: 0.15
@@ -58,3 +66,25 @@ failure_clip_max_s: 900        # safety cap per clip
 idle_detect_stride: 1
 kds_poll: 2                 # seconds between ticket polls (mock mode)
 kds_history: output/orders.jsonl
+
+# ── Video input ──────────────────────────────────────────────────────────────
+# ingest: gstreamer decodes on the Jetson's hardware video decoder
+# (nvv4l2decoder, the element DeepStream is built on); opencv decodes on the
+# CPU.  gstreamer falls back to opencv by itself for sources it cannot handle
+# (camera indexes, codecs other than H.264/H.265).  Override with INGEST=.
+ingest: gstreamer
+# ── ONNX models ──────────────────────────────────────────────────────────────
+# Used when model_path is a .onnx file: tensorrt | cuda | cpu.  tensorrt builds
+# an FP16 engine the first time (~8 min on this Jetson) and caches it in
+# ort_trt_cache/ next to the model.  Override with ONNX_PROVIDER=.
+onnx_provider: tensorrt
+# ── Hotdog lifecycle on the dashboard (src/feed_analysis.py) ─────────────────
+# on counter -> wrapping -> wrapped -> outgoing
+lifecycle:
+  wrapping_cover_ratio: 0.5    # share of the hotdog a wrapper or clamshell must cover...
+  wrapping_dwell_s: 0.4        # ...for this long to count as wrapping
+  wrapped_same_place_s: 2.0    # clamshell: hotdog gone while the clamshell stays put this long
+  wrapped_same_place_px: 40    # ...within this many pixels of where it was
+  outgoing_cooldown_s: 2.0     # one hotdog goes out per touch of the exit line
+  outgoing_window_s: 120       # only hotdogs wrapped this recently can go out
+  lost_after_s: 10             # an unwrapped hotdog unseen this long leaves the live counts

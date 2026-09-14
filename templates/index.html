@@ -878,6 +878,75 @@
     <div class="dashboard-container">
         <!-- Left Sidebar -->
         <div class="sidebar-left">
+            <!-- Analysis window: system + detection analysis (src/feed_analysis.py).
+                 Shown while no KDS feed is live; the KDS panels come back when one is. -->
+            <style>
+                .analysis-window { display: flex; flex-direction: column; gap: 10px; overflow-y: auto; min-height: 0; flex: 1; }
+                .aw-title { display: flex; justify-content: space-between; align-items: baseline; }
+                .aw-clock { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11px; color: #9ca3af; font-weight: 500; }
+                .aw-section { background: #111827; border: 1px solid #374151; border-radius: 8px; padding: 10px 12px; }
+                .aw-h { font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; color: #9ca3af; font-weight: 700; margin-bottom: 8px; display: flex; justify-content: space-between; gap: 8px; }
+                .aw-h small { letter-spacing: 0; text-transform: none; font-weight: 500; color: #6b7280; font-size: 10px; }
+                .aw-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+                .aw-kv { display: flex; flex-direction: column; background: #0b1220; border-radius: 6px; padding: 6px 8px; min-width: 0; }
+                .aw-kv b { font-size: 14px; color: #f3f4f6; font-variant-numeric: tabular-nums; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+                .aw-kv span { font-size: 9.5px; color: #6b7280; text-transform: uppercase; letter-spacing: .04em; white-space: nowrap; }
+                .aw-progress { height: 5px; background: #1f2937; border-radius: 3px; margin-top: 8px; overflow: hidden; }
+                .aw-bar { height: 100%; width: 0; background: #3b82f6; border-radius: 3px; transition: width .5s; }
+                .aw-sub { font-size: 10.5px; color: #9ca3af; margin-top: 6px; font-variant-numeric: tabular-nums; line-height: 1.4; }
+                .aw-states { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+                .aw-state { background: #0b1220; border-radius: 6px; padding: 6px 2px; text-align: center; border-top: 3px solid var(--c); }
+                .aw-state span { display: block; font-size: 18px; font-weight: 800; color: #f3f4f6; font-variant-numeric: tabular-nums; }
+                .aw-state label { font-size: 9px; color: #9ca3af; text-transform: uppercase; letter-spacing: .03em; }
+                .st-on_counter { --c: #60a5fa; } .st-wrapping { --c: #f59e0b; } .st-wrapped { --c: #10b981; } .st-outgoing { --c: #a78bfa; }
+                .ev-hotdog { --c: #60a5fa; } .ev-wrapping { --c: #f59e0b; } .ev-wrapped { --c: #10b981; } .ev-outgoing { --c: #a78bfa; } .ev-sauce { --c: #fb7185; } .ev-item { --c: #22d3ee; }
+                .aw-cards { display: flex; flex-direction: column; gap: 5px; margin-top: 8px; max-height: 210px; overflow-y: auto; }
+                .aw-card { background: #0b1220; border-left: 3px solid var(--c); border-radius: 5px; padding: 6px 8px; font-size: 11px; color: #d1d5db; }
+                .aw-card-top { display: flex; justify-content: space-between; gap: 6px; }
+                .aw-card-top b { color: #f3f4f6; }
+                .aw-pill { font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--c); white-space: nowrap; }
+                .aw-card-sub { color: #9ca3af; font-size: 10px; margin-top: 2px; }
+                .aw-chips { display: flex; flex-wrap: wrap; gap: 5px; }
+                .aw-chip { background: #0b1220; border: 1px solid #374151; border-radius: 999px; padding: 2px 9px; font-size: 10.5px; color: #e5e7eb; font-variant-numeric: tabular-nums; }
+                .aw-chip i { font-style: normal; color: #9ca3af; margin-left: 5px; }
+                .aw-dets { display: flex; flex-direction: column; gap: 3px; max-height: 170px; overflow-y: auto; }
+                .aw-det { display: grid; grid-template-columns: minmax(0, 1fr) 30px 64px; gap: 6px; font-size: 10.5px; color: #d1d5db; align-items: center; font-variant-numeric: tabular-nums; }
+                .aw-det em { font-style: normal; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+                .aw-det .n { color: #f3f4f6; font-weight: 700; text-align: right; }
+                .aw-det .f { color: #6b7280; text-align: right; }
+                .aw-events { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; max-height: 230px; overflow-y: auto; }
+                .aw-events li { font-size: 10.5px; color: #d1d5db; display: grid; grid-template-columns: 54px minmax(0, 1fr); gap: 6px; border-left: 2px solid var(--c, #374151); padding-left: 6px; }
+                .aw-events li time { color: #6b7280; font-family: ui-monospace, Menlo, Consolas, monospace; }
+                .aw-empty { color: #6b7280; font-size: 10.5px; }
+            </style>
+            <div class="sidebar-panel analysis-window" id="analysis-window" style="display: none;">
+                <div class="panel-title aw-title">Analysis <span class="aw-clock" id="aw-clock">--:--:--</span></div>
+                <div class="aw-section">
+                    <div class="aw-h">System <small id="aw-backend"></small></div>
+                    <div class="aw-grid" id="aw-system"></div>
+                    <div class="aw-progress"><div class="aw-bar" id="aw-progress-bar"></div></div>
+                    <div class="aw-sub" id="aw-progress-text"></div>
+                </div>
+                <div class="aw-section">
+                    <div class="aw-h">Hotdogs <small id="aw-hotdog-total"></small></div>
+                    <div class="aw-states">
+                        <div class="aw-state st-on_counter"><span id="aw-s-on_counter">0</span><label>On counter</label></div>
+                        <div class="aw-state st-wrapping"><span id="aw-s-wrapping">0</span><label>Wrapping</label></div>
+                        <div class="aw-state st-wrapped"><span id="aw-s-wrapped">0</span><label>Wrapped</label></div>
+                        <div class="aw-state st-outgoing"><span id="aw-s-outgoing">0</span><label>Outgoing</label></div>
+                    </div>
+                    <div class="aw-sub" id="aw-totals"></div>
+                    <div class="aw-cards" id="aw-hotdogs"></div>
+                </div>
+                <div class="aw-section">
+                    <div class="aw-h">Detections <small>now · frames seen</small></div>
+                    <div class="aw-dets" id="aw-dets"><span class="aw-empty">Waiting for the first frame</span></div>
+                </div>
+                <div class="aw-section">
+                    <div class="aw-h">Events</div>
+                    <ul class="aw-events" id="aw-events"><li class="aw-empty">No events yet</li></ul>
+                </div>
+            </div>
             <div class="sidebar-panel kds-panel">
                 <div class="panel-title">Kitchen Display System (KDS)</div>
                 <div class="kds-tabs">
@@ -938,6 +1007,22 @@
 
         <!-- Right Sidebar -->
         <div class="sidebar-right scrollable">
+            <!-- Analysis mode: what's been added to each hotdog, right where it's easy to see
+                 (and easy to read back on the recorded dashboard capture). Hidden together with
+                 the KDS panels below when analysis mode is off. -->
+            <div class="sidebar-panel aw-added-panel" id="aw-added-panel" style="display: none;">
+                <div class="panel-title aw-title">Added to hotdogs <small id="aw-added-total"></small></div>
+                <div class="aw-section">
+                    <div class="aw-h">Sauces &amp; items <small>bin ingredients not counted</small></div>
+                    <div class="aw-chips" id="aw-added"><span class="aw-empty">Nothing added yet</span></div>
+                </div>
+                <div class="aw-section">
+                    <div class="aw-h">Per hotdog</div>
+                    <div class="aw-cards" id="aw-added-cards" style="max-height: none;"><span class="aw-empty">No hotdogs yet</span></div>
+                </div>
+            </div>
+
+            <div class="kds-panel">
             <div class="analytics-title">
                 <span>Performance Analytics</span>
                 <select>
@@ -1017,6 +1102,7 @@
                     </div>
                 </div>
             </div>
+            </div><!-- /.kds-panel -->
 
         </div>
     </div>
@@ -1675,6 +1761,111 @@
             try {
                 renderRequiredItemsChecklist();
             } catch(e) {}
+        };
+
+        /* ══════════════════════════════════════════════════════════
+           Analysis window (reads `analysis` and `system` from WS)
+        ════════════════════════════════════════════════════════════ */
+        const _awEsc = (v) => String(v ?? '').replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
+        const _awStateLabel = {on_counter: 'On counter', wrapping: 'Wrapping', wrapped: 'Wrapped', outgoing: 'Outgoing'};
+
+        function _awDuration(s) {
+            if (s == null || !isFinite(s)) return '–';
+            s = Math.max(0, Math.round(s));
+            const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+            return h ? `${h}h ${String(m).padStart(2, '0')}m` : `${m}m ${String(sec).padStart(2, '0')}s`;
+        }
+
+        function renderAnalysisWindow(data) {
+            const win = document.getElementById('analysis-window');
+            if (!win) return;
+            const a = data.analysis || {}, sys = data.system || {}, hw = sys.hw || {};
+            const show = Object.keys(a).length > 0 && !data.kds_live;
+            win.style.display = show ? 'flex' : 'none';
+            document.querySelectorAll('.sidebar-left .kds-panel, .sidebar-left .events-panel').forEach(el => {
+                el.style.display = show ? 'none' : '';
+            });
+            const addedPanel = document.getElementById('aw-added-panel');
+            if (addedPanel) addedPanel.style.display = show ? 'flex' : 'none';
+            document.querySelectorAll('.sidebar-right .kds-panel').forEach(el => {
+                el.style.display = show ? 'none' : '';
+            });
+            if (!show) return;
+
+            const num = (v, d = 1, suffix = '') => (v == null || !isFinite(v)) ? '–' : `${Number(v).toFixed(d)}${suffix}`;
+            const kv = (label, value) => `<div class="aw-kv"><b>${_awEsc(value)}</b><span>${_awEsc(label)}</span></div>`;
+            document.getElementById('aw-clock').textContent = `video ${a.video_time || '--:--:--'}`;
+            document.getElementById('aw-backend').textContent = [sys.model, sys.decoder].filter(Boolean).join(' · ');
+            document.getElementById('aw-system').innerHTML = [
+                kv('FPS now', num(sys.fps_now)),
+                kv('FPS average', num(sys.fps_avg)),
+                kv('Detect ms', num(sys.detect_ms, 0)),
+                kv('GPU', num(hw.gpu_pct, 0, '%')),
+                kv('CPU avg / max', hw.cpu_avg_pct == null ? '–' : `${Math.round(hw.cpu_avg_pct)} / ${hw.cpu_max_pct}%`),
+                kv('RAM', hw.ram_used_mb == null ? '–' : `${(hw.ram_used_mb / 1024).toFixed(1)} GB`),
+                kv('Temperature', num(hw.temp_c, 0, ' °C')),
+                kv('Power', num(hw.power_w, 1, ' W')),
+                kv('Loop ms', num(sys.loop_ms, 0)),
+            ].join('');
+            const dur = sys.duration_s || 0, vs = sys.video_s || 0;
+            const pct = dur ? Math.min(100, (100 * vs) / dur) : 0;
+            document.getElementById('aw-progress-bar').style.width = `${pct.toFixed(1)}%`;
+            document.getElementById('aw-progress-text').textContent = dur
+                ? `${(sys.frames || 0).toLocaleString()} frames · ${pct.toFixed(1)}% of the video · about ${_awDuration(sys.eta_s)} left`
+                : `${(sys.frames || 0).toLocaleString()} frames`;
+
+            const st = a.states || {}, tot = a.totals || {};
+            ['on_counter', 'wrapping', 'wrapped', 'outgoing'].forEach(k => {
+                const el = document.getElementById(`aw-s-${k}`);
+                if (el) el.textContent = st[k] ?? 0;
+            });
+            document.getElementById('aw-hotdog-total').textContent = `${tot.hotdogs ?? 0} seen`;
+            document.getElementById('aw-totals').textContent =
+                `So far: ${tot.wrapping ?? 0} wrapping · ${tot.wrapped ?? 0} wrapped · ${tot.outgoing ?? 0} outgoing · ${tot.line_touches ?? 0} exit-line touches`;
+            document.getElementById('aw-hotdogs').innerHTML = (a.hotdogs || []).map(h => {
+                const bits = [h.packaging, h.wrapped_by].filter(Boolean);
+                const added = [...(h.sauces || []), ...(h.items || [])].map(x => x.name);
+                const when = h.outgoing_at || h.wrapped_at || h.wrapping_at || h.first_seen || '';
+                return `<div class="aw-card st-${_awEsc(h.state)}">
+                    <div class="aw-card-top"><b>Hotdog #${_awEsc(h.id)}</b><span class="aw-pill">${_awEsc(_awStateLabel[h.state] || h.state)}${h.lost ? ' · lost' : ''}</span></div>
+                    <div class="aw-card-sub">${_awEsc(when)}${bits.length ? ' · ' + _awEsc(bits.join(' · ')) : ''}</div>
+                    ${added.length ? `<div class="aw-card-sub">Added: ${_awEsc(added.join(', '))}</div>` : ''}
+                </div>`;
+            }).join('') || '<span class="aw-empty">No hotdogs yet</span>';
+
+            const chips = [...Object.entries(a.sauces || {}), ...Object.entries(a.items || {})]
+                .map(([name, n]) => `<span class="aw-chip">${_awEsc(name)}<i>×${n}</i></span>`).join('');
+            document.getElementById('aw-added').innerHTML = chips || '<span class="aw-empty">Nothing added yet</span>';
+            document.getElementById('aw-added-total').textContent = `${(tot.sauces ?? 0) + (tot.items ?? 0)} total`;
+
+            // Right-side breakdown: only hotdogs that actually have something added, so a hand
+            // touching a bin item and then placing it is what shows up here -- not every hotdog.
+            const withAdds = (a.hotdogs || []).filter(h => (h.sauces || []).length || (h.items || []).length);
+            document.getElementById('aw-added-cards').innerHTML = withAdds.length
+                ? withAdds.map(h => {
+                    const added = [...(h.sauces || []), ...(h.items || [])].map(x => x.name);
+                    return `<div class="aw-card st-${_awEsc(h.state)}">
+                        <div class="aw-card-top"><b>Hotdog #${_awEsc(h.id)}</b><span class="aw-pill">${_awEsc(_awStateLabel[h.state] || h.state)}</span></div>
+                        <div class="aw-card-sub">${_awEsc(added.join(', '))}</div>
+                    </div>`;
+                }).join('')
+                : '<span class="aw-empty">No hotdogs yet</span>';
+
+            const frames = a.detections_frames || {}, liveNow = a.detections_live || {};
+            const names = Object.keys(frames);
+            document.getElementById('aw-dets').innerHTML = names.length
+                ? names.map(n => `<div class="aw-det"><em>${_awEsc(n.replace(/_/g, ' '))}</em><span class="n">${liveNow[n] || 0}</span><span class="f">${Number(frames[n]).toLocaleString()}</span></div>`).join('')
+                : '<span class="aw-empty">Waiting for the first frame</span>';
+
+            document.getElementById('aw-events').innerHTML = (a.events || []).map(e =>
+                `<li class="ev-${_awEsc(e.kind)}"><time>${_awEsc(e.at)}</time><span>${_awEsc(e.text)}</span></li>`
+            ).join('') || '<li class="aw-empty">No events yet</li>';
+        }
+
+        const _awPrevOnMessage = ws.onmessage;
+        ws.onmessage = (event) => {
+            if (_awPrevOnMessage) _awPrevOnMessage(event);
+            try { renderAnalysisWindow(JSON.parse(event.data)); } catch (e) { console.error('Analysis window render failed', e); }
         };
     </script>
 </body>

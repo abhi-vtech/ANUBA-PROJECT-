@@ -11,6 +11,19 @@ RULE 6 (no early failure)
     Nothing here can produce a WRONG verdict except :meth:`_finalize`, and that
     only runs on a confirmed order-end signal.
 
+RULE 7 (the requirement is frozen at creation)
+    ``hotdogs`` is set once, when the group is created, and is never rewritten.
+    A later reading of the same card is recorded on the timeline but changes
+    nothing, so an order is always judged against the ticket it entered with.
+
+    This replaced an additive merge that folded readings together by item.  That
+    merge could not represent the common case of one item on two separate lines
+    -- two ``1 ORG C/C`` rows, one carrying an add-on -- because it keyed on the
+    item name and kept the larger quantity rather than the sum, so re-reading an
+    unchanged card silently dropped a required hotdog (3 -> 2).  A requirement
+    that can only be wrong in the direction of *too small* is worse than one
+    that cannot move at all: a missing hotdog stops being looked for.
+
 RULE 8 (final validation)
     An order is judged exactly once, when the ticket DISAPPEARS from the KDS --
     that is the moment the order is genuinely over, because the ticket has been
@@ -36,7 +49,6 @@ from __future__ import annotations
 
 import logging
 import time
-from dataclasses import replace
 from typing import Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from src.kds.schemas import (
@@ -51,49 +63,6 @@ from src.kds.schemas import (
 )
 
 logger = logging.getLogger(__name__)
-
-
-def _content_signature(hotdogs) -> tuple:
-    """Comparable summary of an item list, add-ons included."""
-    return tuple(
-        sorted(
-            (h.item, h.quantity, tuple(sorted(a.key for a in h.addons)))
-            for h in hotdogs
-        )
-    )
-
-
-def _merge_hotdogs(existing, incoming):
-    """Fold a fresh KDS reading into what the ticket already asks for.
-
-    Additive on purpose.  A later reading is another observation of the same
-    ticket, not a replacement for it: OCR drops a line often enough that a
-    straight overwrite would quietly delete a requirement the kitchen still has
-    to make, and a vanished requirement is invisible -- it just stops being
-    checked.  So a quantity may rise and add-ons may appear, but nothing is
-    removed by a reading that failed to see it.
-
-    Items genuinely voided at the counter therefore stay on the checklist.
-    That is the deliberate trade: a stale requirement is visible and can be
-    judged, a silently dropped one cannot.
-    """
-    by_item = {}
-    order = []
-    for group in list(existing) + list(incoming):
-        current = by_item.get(group.item)
-        if current is None:
-            by_item[group.item] = replace(group, addons=list(group.addons))
-            order.append(group.item)
-            continue
-        # Same item seen again: keep the larger requirement.
-        if group.quantity > current.quantity:
-            current.quantity = group.quantity
-        seen = {a.key for a in current.addons}
-        for addon in group.addons:
-            if addon.key not in seen:
-                current.addons.append(addon)
-                seen.add(addon.key)
-    return [by_item[item] for item in order]
 
 
 class TicketManager:
@@ -133,33 +102,6 @@ class TicketManager:
                 self._on_event(kind, payload)
             except Exception:  # pragma: no cover - listener must never break us
                 logger.exception("KDS event listener failed for %s", kind)
-
-    def update_content(self, ticket_id: str, hotdogs, now: float) -> bool:
-        """Apply a KDS content change to a ticket already in the system.
-
-        A ticket can gain or lose items after it first appears -- an item added
-        at the counter, or a line that was misread on the first pass and has
-        since settled.  The order keeps its identity and its accumulated
-        detections; only the requirement changes.  Refused once evidence is
-        frozen, because by then the order has been judged.
-        """
-        group = self.get(ticket_id)
-        if group is None or group.evidence_frozen:
-            return False
-
-        before = group.expected_total
-        merged = _merge_hotdogs(group.hotdogs, hotdogs)
-        if _content_signature(merged) == _content_signature(group.hotdogs):
-            return False
-        group.hotdogs = merged
-        logger.info(
-            "Ticket %s content updated: expected %d -> %d hotdog(s)",
-            ticket_id,
-            before,
-            group.expected_total,
-        )
-        self._emit("updated", {"ticket_id": ticket_id, "group": group.to_dict()})
-        return True
 
     def _transition(self, group: OrderGroup, state: LifecycleState, now: float) -> bool:
         """Apply a lifecycle transition, refusing illegal ones."""

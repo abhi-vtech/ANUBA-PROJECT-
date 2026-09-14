@@ -21,7 +21,7 @@ import numpy as np
 import yaml
 
 from src.kds.schemas import RowColor
-from src.paths import resource
+from src.domain.paths import resource
 
 logger = logging.getLogger(__name__)
 

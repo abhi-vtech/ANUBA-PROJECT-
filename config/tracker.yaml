@@ -1,5 +1,14 @@
 # Tracker backend: botsort | bytetrack | deepsort
-tracker_type: botsort
+#
+# bytetrack, not botsort.  config/model.yaml already declares
+# `tracker_type: bytetrack`, but Ultralytics reads the algorithm from THIS
+# file, so botsort here silently overrode it.  BoT-SORT's sparseOptFlow global
+# motion compensation costs ~34 ms/frame on this footage (12.3 -> 21.2 FPS
+# measured on 50 real frames, identical 6.8 detections/frame) and is the source
+# of the recurring "not enough matching points" warning.  The wrap_station:
+# block below also documents itself as overriding "the global ByteTrack
+# params", which is further evidence botsort was the accident.
+tracker_type: bytetrack
 
 # Shared parameters (botsort / bytetrack)
 # Note: track_low_thresh kept at 0.10 (was 0.05) — irrelevant in practice

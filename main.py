@@ -136,7 +136,7 @@ def main() -> int:
     # Off by default: one of those fires every frame while a pick is in
     # transit, which floods the console and slows the loop.
     if os.environ.get("TRIP_DEBUG") == "1":
-        logging.getLogger("src.temporal").setLevel(logging.DEBUG)
+        logging.getLogger("src.analysis.temporal").setLevel(logging.DEBUG)
         print("  TRIP_DEBUG on: ingredient trip logging enabled", flush=True)
 
     if os.environ.get("OPEN_BROWSER", "1") != "0":

@@ -17,7 +17,7 @@ from typing import Dict, List, Optional, Tuple
 import yaml
 
 from src.kds.schemas import UNKNOWN_SHORTCUT, AddOn, HotdogGroup
-from src.paths import resource
+from src.domain.paths import resource
 
 logger = logging.getLogger(__name__)
 

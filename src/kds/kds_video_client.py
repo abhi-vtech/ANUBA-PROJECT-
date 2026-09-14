@@ -1,11 +1,11 @@
 """Bridge the KDS video reader into the existing pipeline.
 
-:class:`KDSVideoClient` implements the same ``src.kds_client.KDSClient``
+:class:`KDSVideoClient` implements the same ``src.kds.client.KDSClient``
 interface as ``MockKDSClient``, so ``OrderStateMachine``, the dashboard and
 ``src/main.py`` keep working unchanged -- they simply receive tickets that came
 from OCR of a real KDS screen instead of from a JSON file.
 
-The KDS video runs on its own :class:`~src.capture.VideoCaptureThread`, decoupled
+The KDS video runs on its own :class:`~src.video.capture.VideoCaptureThread`, decoupled
 from the production video, and both streams stamp events with the same
 ``time.monotonic`` clock.  A fixed ``sync.kds_offset_s`` in
 ``config/kds_visual.yaml`` corrects a known capture start difference.
@@ -18,13 +18,13 @@ import threading
 import time
 from typing import Callable, List, Optional
 
-from src.capture import VideoCaptureThread
+from src.video.capture import VideoCaptureThread
 from src.kds.colors import load_visual_config
 from src.kds.fifo_queue import TicketManager
 from src.kds.kds_monitor import KdsMonitor
 from src.kds.timeline import EventTimeline
-from src.kds_client import KDSClient
-from src.schemas import Ticket
+from src.kds.client import KDSClient
+from src.domain.schemas import Ticket
 
 logger = logging.getLogger(__name__)
 
@@ -80,10 +80,6 @@ class KDSVideoClient(KDSClient):
         self._lock = threading.Lock()
         # Tickets confirmed PAID and not yet handed to OrderStateMachine.
         self._pending: List[Ticket] = []
-        # Tickets whose content changed after they entered the system.  Drained
-        # by src/main.py so the order state machine and the dashboard checklist
-        # follow the KDS instead of holding the first reading forever.
-        self._updates: List[Ticket] = []
         self._delivered: set = set()
         self._ended = threading.Event()
         # Extra listeners for TicketManager events (the failure recorder uses
@@ -195,25 +191,22 @@ class KDSVideoClient(KDSClient):
         self._listeners.append(callback)
 
     def _on_manager_event(self, kind: str, payload: dict) -> None:
-        """Queue a Ticket the moment its order group is created."""
+        """Queue a Ticket the moment its order group is created.
+
+        Only "created" produces a Ticket.  A ticket's requirement is frozen at
+        creation, so a later KDS reading is recorded on the timeline but never
+        handed downstream.
+        """
         for listener in self._listeners:
             try:
                 listener(kind, payload)
             except Exception:  # pragma: no cover - a listener must not break us
                 logger.exception("KDS listener failed for %s", kind)
-        if kind not in ("created", "updated"):
+        if kind != "created":
             return
         ticket_id = payload.get("ticket_id", "")
         group = self.manager.get(ticket_id)
         if group is None:
-            return
-        if kind == "updated":
-            with self._lock:
-                # Supersede any queued update for the same ticket; only the
-                # latest reading matters.
-                self._updates = [t for t in self._updates if t.ticket_id != ticket_id]
-                self._updates.append(group.to_ticket())
-            logger.info("Ticket %s update queued for the order state machine", ticket_id)
             return
         with self._lock:
             if ticket_id in self._delivered:
@@ -229,12 +222,6 @@ class KDSVideoClient(KDSClient):
             if self._pending:
                 return self._pending.pop(0)
         return None
-
-    def get_ticket_updates(self) -> List[Ticket]:
-        """Content changes since the last call, newest reading per ticket."""
-        with self._lock:
-            updates, self._updates = self._updates, []
-        return updates
 
     def get_all_tickets(self) -> List[Ticket]:
         return [g.to_ticket() for g in self.manager.queue]

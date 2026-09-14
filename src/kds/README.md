@@ -4,7 +4,7 @@ Second video input for the Order Accuracy pipeline: reads the **KDS screen**,
 extracts paid tickets, and validates them against what the existing
 **production video** pipeline detects.
 
-The production pipeline is reused unchanged — `src/detector.py`,
+The production pipeline is reused unchanged — `src/inference/detector.py`,
 `src/hotdog_tracker.py`, `src/wrapping_state.py`, `src/zones.py`,
 `src/temporal.py`, `src/state_machine.py` are untouched.
 

@@ -57,29 +57,67 @@ DEFAULT_PRODUCTION = (
 
 VIDEO_SUFFIXES = (".mkv", ".mp4", ".avi", ".mov", ".m4v")
 
+VIDEO_DIR = ROOT / "videos"
+
+# Recordings from the exporter carry their role in the filename:
+#     ..._Sacramento_CA_95818__kds__2026_09_06_11_to_12_PDT.mkv   the KDS screen
+#     ..._Sacramento_CA_95818__camA__2026_09_06_11_to_12_PDT.mkv  the kitchen
+# so a pair dropped straight into videos/ is resolvable without the KDS_Feed/
+# and KDS/ subfolders.
+FILENAME_MARKERS = {
+    "kds": ("__kds__", "_kds_", "kds_feed"),
+    "production": ("__cam", "_cam", "__camera"),
+}
+
+
+def _videos_in(folder: Path) -> list:
+    if not folder.is_dir():
+        return []
+    return sorted(
+        p for p in folder.iterdir()
+        if p.is_file() and p.suffix.lower() in VIDEO_SUFFIXES
+    )
+
 
 def resolve_default(named: Path, folder: Path, label: str) -> Path | None:
     """Pick the default video for one input.
 
-    Prefers the named file; otherwise falls back to the only video in the
-    folder.  Returns ``None`` when neither exists, so the caller can print a
-    useful message instead of failing on a missing path.
+    Prefers the named file, then the only video in the role's folder, then a
+    file in ``videos/`` whose name carries the role marker.  Returns ``None``
+    when none of those exist, so the caller can print a useful message instead
+    of failing on a missing path.
     """
     if named.exists():
         return named
-    if folder.is_dir():
-        videos = sorted(
-            p for p in folder.iterdir()
-            if p.is_file() and p.suffix.lower() in VIDEO_SUFFIXES
+
+    videos = _videos_in(folder)
+    if len(videos) == 1:
+        return videos[0]
+    if len(videos) > 1:
+        print(
+            "note: %s holds %d videos; using %s (pass --%s to choose another)"
+            % (folder.name, len(videos), videos[0].name, label)
         )
-        if len(videos) == 1:
-            return videos[0]
-        if len(videos) > 1:
-            print(
-                "note: %s holds %d videos; using %s (pass --%s to choose another)"
-                % (folder.name, len(videos), videos[0].name, label)
-            )
-            return videos[0]
+        return videos[0]
+
+    # The role folder is missing or empty: fall back to the filename markers on
+    # anything sitting directly in videos/.
+    markers = FILENAME_MARKERS.get(label, ())
+    matches = [
+        p for p in _videos_in(VIDEO_DIR)
+        if any(m in p.name.lower() for m in markers)
+    ]
+    if len(matches) == 1:
+        print("note: using %s for the %s input (matched by filename)"
+              % (matches[0].name, label))
+        return matches[0]
+    if len(matches) > 1:
+        print(
+            "note: %d videos in videos/ look like the %s input; using %s "
+            "(pass --%s to choose another)"
+            % (len(matches), label, matches[0].name, label)
+        )
+        return matches[0]
     return None
 
 
@@ -143,6 +181,15 @@ def parse_args(argv=None):
         action="store_true",
         help="Exit once the production video finishes.",
     )
+    parser.add_argument(
+        "--max-tickets",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Stop after N tickets have been judged (0 = run the whole video). "
+             "A ticket is judged when it leaves the KDS, so this samples whole "
+             "orders rather than a fixed number of minutes.",
+    )
     return parser.parse_args(argv)
 
 
@@ -194,10 +241,14 @@ def main(argv=None) -> int:
         env["RECORD_FAILURES"] = "false"
     if args.idle_detect_stride is not None:
         env["IDLE_DETECT_STRIDE"] = str(args.idle_detect_stride)
+    if args.max_tickets is not None:
+        env["MAX_TICKETS"] = str(args.max_tickets)
 
     print("KDS input        : %s" % args.kds)
     print("Production input : %s" % args.production)
     print("Dashboard        : http://localhost:8000")
+    if args.max_tickets:
+        print("Stopping after   : %d judged ticket(s)" % args.max_tickets)
     if not args.no_record_failures:
         print("Failure clips    : output/failures/  (kept only for WRONG orders)")
     if args.idle_detect_stride is not None:

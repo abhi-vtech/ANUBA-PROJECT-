@@ -12,24 +12,27 @@ import numpy as np
 import uvicorn
 import yaml
 
-from src.capture import VideoCaptureThread
+from src.video.capture import VideoCaptureThread
 from src import dashboard
-from src.dashboard import add_event, app, update_frame_data, cart_machine
-from src.detector import Detector
-from src.flow import OpticalFlowAnalyzer
-from src.kds_client import DynamicKDSClient, MockKDSClient
-from src.paths import resource
-from src.schemas import HAND_CLASS, SAUCE_CLASSES, Action, Detection, OrderStatus
-from src.state_machine import OrderStateMachine
-from src.hotdog_tracker import (
+from src.ui.dashboard import add_event, app, update_frame_data, cart_machine
+from src.inference.detector import Detector
+from src.analysis.flow import OpticalFlowAnalyzer
+from src.kds.client import DynamicKDSClient, MockKDSClient, NullKDSClient
+from src.domain.paths import resource
+from src.domain.schemas import HAND_CLASS, SAUCE_CLASSES, Action, Detection, OrderStatus
+from src.analysis.state_machine import OrderStateMachine
+from src.analysis.hotdog_tracker import (
     HotdogTracker,
     _shrink_hand_bbox,
     _hand_working_point,
 )
 # ── Wrapping-state order-completion module (additive — do not remove) ──────────
-from src.wrapping_state import WrappingStateMachine
-from src.temporal import TemporalTracker
-from src.zones import ZoneManager
+from src.analysis.wrapping_state import WrappingStateMachine
+from src.analysis.temporal import TemporalTracker
+# ── Cheese pre-gate (additive — do not remove) ────────────────────────────────
+from src.analysis.cheese_gate import CheesePreGate
+from src.domain.zones import ZoneManager
+from src.video.video_recorder import recorder_from_env
 
 metrics_logger = logging.getLogger("src.metrics")
 logger = logging.getLogger(__name__)
@@ -431,7 +434,7 @@ def draw_annotations(frame, detections, zones, current_order):
 
 
 # ── Exit-line tripwire module (additive — do not remove) ─────────────────────
-from src.exit_detector import ExitDetector  # noqa: E402
+from src.analysis.exit_detector import ExitDetector  # noqa: E402
 
 _main_exit_detector = ExitDetector(resource("config/exit_line.json"))
 
@@ -479,7 +482,7 @@ def _draw_exit_line_overlays(
 
     if evt:
         logger.info(f"🔥 [EXIT LINE] Outgoing Hotdog Detected! Exited: {evt.exited_hotdog_ids}")
-        from src.dashboard import record_hotdog_exit
+        from src.ui.dashboard import record_hotdog_exit
         record_hotdog_exit(evt.exited_hotdog_ids)
         add_event("hotdog_exited", zone="Exit_Line_ROI", item="hotdog_exited")
 
@@ -487,7 +490,7 @@ def _draw_exit_line_overlays(
 
 
 # ── Wrapping-state on-screen overlays (additive — do not remove) ───────────────
-from src.wrapping_state import STATE_CLOSING, STATE_DONE  # noqa: E402
+from src.analysis.wrapping_state import STATE_CLOSING, STATE_DONE  # noqa: E402
 
 
 
@@ -545,10 +548,13 @@ def main():
         level=getattr(logging, log_level.upper(), logging.WARNING),
         format="%(asctime)s %(name)s %(levelname)s: %(message)s",
     )
-    logging.getLogger("src.temporal").setLevel(logging.DEBUG)
+    logging.getLogger("src.analysis.temporal").setLevel(logging.DEBUG)
     logging.getLogger("src.metrics").setLevel(logging.INFO)
 
     log_path = Path("output/yolo_detections.log")
+    # output/ is gitignored, so a fresh clone has no such directory and the
+    # open() below raises FileNotFoundError before the pipeline ever starts.
+    log_path.parent.mkdir(parents=True, exist_ok=True)
     if log_path.exists():
         try:
             log_path.unlink()
@@ -664,6 +670,12 @@ def main():
             )),
             "knife": 0.80,
         },
+        # Jetson GPU knobs.  half -> FP16 (auto-disabled if CUDA is absent);
+        # imgsz -> inference resolution.  Both overridable per-run with the
+        # HALF / IMGSZ env vars, or persistently in config/model.yaml.
+        half=str(_env("HALF", config.get("half", True))).lower()
+        in ("1", "true", "yes"),
+        imgsz=_env("IMGSZ", config.get("imgsz"), int),
     )
     zones = ZoneManager(resource("config/zones.json"))
 
@@ -779,6 +791,13 @@ def main():
         base_hand_displacement_px=_wrap_hand_disp,
     )
 
+    # Stop once this many tickets have been judged (0 = run the whole video).
+    # A ticket is judged when it leaves the KDS, so this samples whole orders
+    # from the front of a recording rather than a fixed number of minutes.
+    max_tickets = int(_env("MAX_TICKETS", config.get("max_tickets", 0)))
+    _tickets_judged = []                      # one entry per verdict, for the log
+    _ticket_limit_reached = threading.Event()  # set on the KDS reader thread
+
     # kds_video_client is imported lazily: the KDS reader pulls in OCR
     # dependencies that the production-only pipeline must not require.
     kds_video = None
@@ -822,6 +841,9 @@ def main():
             enabled=str(
                 _env("RECORD_FAILURES", config.get("record_failures", True))
             ).lower() not in ("false", "0", "no"),
+            preroll_s=float(
+                _env("FAILURE_CLIP_PREROLL_S", config.get("failure_clip_preroll_s", 20.0))
+            ),
         )
 
         def _on_kds_group_event(kind, payload):
@@ -832,12 +854,25 @@ def main():
             elif kind == "finalized":
                 _pending_recordings.discard(ticket_id)
                 result = payload.get("result") or {}
+                correct = bool(payload.get("correct"))
+                # finish() first: the clip must be closed and kept-or-deleted
+                # before the limit below can stop the run.
                 failure_recorder.finish(
                     ticket_id,
-                    correct=bool(payload.get("correct")),
+                    correct=correct,
                     detail=result.get("message", ""),
                     result=result,
                 )
+                _tickets_judged.append((ticket_id, correct))
+                logger.info(
+                    "Ticket %s judged %s (%d ticket(s) judged%s)",
+                    ticket_id,
+                    "CORRECT" if correct else "WRONG",
+                    len(_tickets_judged),
+                    " of %d requested" % max_tickets if max_tickets > 0 else "",
+                )
+                if 0 < max_tickets <= len(_tickets_judged):
+                    _ticket_limit_reached.set()
 
         kds_video.add_listener(_on_kds_group_event)
     elif kds_mode == "dynamic":
@@ -850,6 +885,10 @@ def main():
             max_tickets=config.get("kds_dynamic_max_tickets", 0),
             seed=config.get("kds_dynamic_seed"),
         )
+    elif kds_mode in ("none", "off", "disabled"):
+        # Detection-only.  No tickets are ever issued, so the state machine
+        # stays idle and nothing downstream of detection does any work.
+        kds = NullKDSClient()
     else:
         kds = MockKDSClient(
             resource("config/kds_mock.json"), poll_interval=config.get("kds_poll", 2), loop=True
@@ -885,21 +924,59 @@ def main():
     video_playlist = [source]
     current_video_idx = 0
 
-    capture = VideoCaptureThread(
+    # Hardware video decode (nvv4l2decoder) unless INGEST=opencv or the source
+    # has no hardware chain; see src/gst_capture.py.
+    from src.video.gst_capture import open_capture
+
+    capture = open_capture(
         source,
         target_width=frame_w,
         target_height=frame_h,
         fps=fps,
         realtime=realtime,
+        ingest=str(_env("INGEST", config.get("ingest", "gstreamer"))),
     )
     capture.start()
+    logger.info("Video input: %s via %s", source, getattr(capture, "backend", "opencv"))
 
     from src import dashboard
 
     dashboard.state_machine = state_machine
 
+    # Feed analysis and system stats for the dashboard's Analysis window.
+    import atexit
+
+    from src.analysis.feed_analysis import FeedAnalyzer
+    from src.system_monitor import SystemMonitor
+
+    analyzer = FeedAnalyzer(
+        zones=zones,
+        zones_path=resource("config/zones.json"),
+        exit_config=resource("config/exit_line.json"),
+        lifecycle=config.get("lifecycle"),
+    )
+    system_monitor = SystemMonitor().start()
+    analysis_path = Path(resource("output/feed_analysis.json"))
+    atexit.register(system_monitor.stop)
+    atexit.register(lambda: analyzer.write_json(analysis_path))
+    video_duration_s = 0.0
+    if capture._is_file_source and capture.cap.get(cv2.CAP_PROP_FPS):
+        video_duration_s = capture.cap.get(cv2.CAP_PROP_FRAME_COUNT) / capture.cap.get(cv2.CAP_PROP_FPS)
+    if detector.backend == "onnx":
+        model_label = {"tensorrt": "ONNX · TensorRT FP16", "cuda": "ONNX · CUDA",
+                       "cpu": "ONNX · CPU"}.get(detector.onnx_provider, "ONNX")
+    elif detector.backend == "tensorrt":
+        model_label = "TensorRT engine"
+    else:
+        model_label = "PyTorch FP16" if detector.half else "PyTorch"
+    decoder_label = {"nvv4l2decoder": "hardware decode", "opencv": "CPU decode"}.get(
+        getattr(capture, "backend", "opencv"), "CPU decode")
+    last_analysis_publish = 0.0
+    last_analysis_write = time.time()
 
     prev_gray = None
+    # Optional recording of the annotated feed (RECORD_VIDEO=<path>).
+    recorder = recorder_from_env(fps, source)
     frame_count = 0
     last_metrics_time = time.time()
     pipeline_start_time = time.time()
@@ -917,7 +994,25 @@ def main():
         min_coverage_ratio=float(_env("WRAPPING_MIN_COVERAGE_RATIO", config.get("wrapping_min_coverage_ratio", 0.25))),
     )
     SAUCE_MIN_FRAMES = 1     # 1 frame accumulation for responsive detection
-    
+
+    # ── Cheese pre-gate (additive — do not remove) ─────────────────────────────
+    # Cheese is fetched first on this line, routinely before the KDS ticket has
+    # been confirmed and reached the head of the FIFO.  on_action() drops every
+    # event while no order is in progress, so without this the one ingredient a
+    # C/C turns on is the one never recorded.  The gate watches the cheese wells
+    # regardless of ticket state and confirms a slice when the hand carries it
+    # out of the cheese_region; takes made with no order live are buffered and
+    # replayed when the ticket confirms.
+    cheese_gate = CheesePreGate(
+        zones,
+        lookback_s=float(_env("CHEESE_LOOKBACK_S", config.get("cheese_lookback_s", 120.0))),
+        enabled=str(_env("CHEESE_GATE", config.get("cheese_gate", True))).lower()
+        not in ("false", "0", "no"),
+    )
+    # While the gate owns cheese, on_action must ignore the well-exit place
+    # event or every slice is counted twice.
+    state_machine.cheese_gate_owns_cheese = cheese_gate.enabled
+
     kds_image_cache = {}
 
     # Idle-mode tuning: how often to still run YOLO while the KDS is empty.
@@ -929,26 +1024,42 @@ def main():
     _idle_state = False
     _idle_frames = 0
     _idle_t0 = 0.0          # start of the current idle stretch, for the heartbeat
+    # Media time of the frame being processed.  Seeded here because the ticket
+    # poll at the top of the loop runs before the first frame is read, and the
+    # cheese replay below needs a clock to prune its buffer against.
+    current_time = 0.0
 
     try:
         while True:
             loop_start = time.perf_counter()
 
+            # MAX_TICKETS reached.  Checked here rather than in the listener so
+            # the run stops between frames, with the clip for the last ticket
+            # already closed by finish().
+            if _ticket_limit_reached.is_set():
+                logger.info(
+                    "Stopping: %d ticket(s) judged (MAX_TICKETS=%d)",
+                    len(_tickets_judged), max_tickets,
+                )
+                if state_machine.current_ticket is not None:
+                    state_machine.finalize_current_order()
+                break
+
             if state_machine.current_ticket is None:
                 ticket = kds.get_next_ticket()
                 if ticket:
                     state_machine.on_kds_ticket(ticket)
-
-            # A ticket can change on the KDS after it enters the system.  Apply
-            # those changes to the order already in flight, keeping whatever it
-            # has accumulated -- otherwise the checklist shows the first reading
-            # for the rest of the order's life.
-            if kds_video is not None:
-                for updated in kds_video.get_ticket_updates():
-                    if state_machine.update_kds_ticket(updated):
+                    # The ticket is confirmed now, but the cheese for it was
+                    # probably fetched before it was.  Replay what the gate
+                    # buffered while the board was empty.
+                    replayed = state_machine.apply_cheese_takes(
+                        cheese_gate.drain(current_time), pre_confirmation=True
+                    )
+                    if replayed:
                         logger.info(
-                            "Order %s requirements updated from the KDS",
-                            updated.ticket_id,
+                            "Ticket %s confirmed: %d cheese slice(s) taken before "
+                            "confirmation applied to it",
+                            ticket.ticket_id, replayed,
                         )
 
             frame_item = capture.get_frame()
@@ -1044,6 +1155,8 @@ def main():
                     1,
                     cv2.LINE_AA,
                 )
+                if recorder is not None:
+                    recorder.write(idle_view)
                 update_frame_data(
                     idle_view,
                     state_machine.current_ticket,
@@ -1152,6 +1265,20 @@ def main():
                 requires_relish=requires_relish,
             )
             temporal_ms = (time.perf_counter() - temporal_start) * 1000.0
+
+            # ── Cheese pre-gate (additive — do not remove) ─────────────────────
+            # Runs whatever the ticket state is.  A take confirmed while an order
+            # is in progress is applied straight away (and dropped from the
+            # buffer so the replay above cannot use it twice); one confirmed with
+            # the board empty stays buffered for the ticket that follows.
+            cheese_takes = cheese_gate.update(hand_detections, w, h, current_time)
+            if cheese_takes and state_machine.current_order.status == OrderStatus.IN_PROGRESS:
+                state_machine.apply_cheese_takes(cheese_takes)
+                # Forget every take the live order was offered, not just the ones
+                # it counted: one dropped by the debounce was a duplicate, and
+                # replaying it onto the next ticket would invent a slice.
+                for _take in cheese_takes:
+                    cheese_gate.forget(_take)
 
             # ── Sauce detection ───────────────────────────────────────────────
             # Spatial gate — three exclusive zones, no track_id state needed:
@@ -1632,7 +1759,7 @@ def main():
                 )
 
             # ── Automated Cart State Machine Transitions ───────────────────────
-            from src.cart_state_machine import CartEvent, EventType
+            from src.analysis.cart_state_machine import CartEvent, EventType
 
             # Check active hotdogs in tracker (with persistence to prevent flickering)
             has_active_hotdogs = len(hotdog_tracker._records) > 0
@@ -1655,6 +1782,56 @@ def main():
                 frame.copy(), visible_detections, zones, state_machine.get_current_order()
             )
 
+            # ── Feed analysis: hotdog lifecycle, sauces, items, outgoing ──────
+            # Read-only: nothing here feeds back into tracking, KDS or orders.
+            try:
+                analyzer.update(
+                    frame_idx=frame_count,
+                    video_time=current_time,
+                    frame_size=(w, h),
+                    detections=detections,
+                    visible_detections=visible_detections,
+                    actions=actions,
+                    wrapping_events=_wrapping_events,
+                    hotdog_tracker=hotdog_tracker,
+                )
+                analyzer.draw(annotated)  # exit line, red while a hand touches it
+            except Exception:
+                logger.exception("Feed analysis failed on frame %d", frame_count)
+            _now_wall = time.time()
+            _prev_wall = getattr(analyzer, "_prev_frame_wall", None)
+            analyzer._prev_frame_wall = _now_wall
+            if _prev_wall is not None and _now_wall > _prev_wall:
+                _inst = 1.0 / (_now_wall - _prev_wall)
+                analyzer._fps_ema = 0.9 * getattr(analyzer, "_fps_ema", _inst) + 0.1 * _inst
+            if _now_wall - last_analysis_publish >= 0.25:
+                last_analysis_publish = _now_wall
+                _elapsed = _now_wall - pipeline_start_time
+                _video_s = current_time if capture._is_file_source else 0.0
+                _rate = _video_s / _elapsed if _elapsed > 0 else 0.0
+                dashboard.set_analysis(analyzer.snapshot())
+                dashboard.set_system({
+                    "model": model_label,
+                    "decoder": decoder_label,
+                    "fps_now": round(getattr(analyzer, "_fps_ema", 0.0), 1),
+                    "fps_avg": round(frame_count / _elapsed, 2) if _elapsed > 0 else None,
+                    "detect_ms": round(detect_ms, 1),
+                    "flow_ms": round(flow_ms, 1),
+                    "loop_ms": round(1000.0 / analyzer._fps_ema, 1) if getattr(analyzer, "_fps_ema", 0) else None,
+                    "frames": frame_count,
+                    "video_s": round(_video_s, 1),
+                    "duration_s": round(video_duration_s, 1),
+                    "eta_s": round((video_duration_s - _video_s) / _rate) if _rate > 0 and video_duration_s else None,
+                    "recorder": getattr(recorder, "encoder", None) if recorder is not None else None,
+                    "hw": system_monitor.snapshot(),
+                })
+            if _now_wall - last_analysis_write >= 30.0:
+                last_analysis_write = _now_wall
+                try:
+                    analyzer.write_json(analysis_path)
+                except OSError:
+                    logger.debug("Could not write %s", analysis_path, exc_info=True)
+
             _wrapping_done_mono = set()
             for _yolo_tid in list(wrapping_sm.done_ids):
                 _mono = hotdog_tracker._detector_id_map.get(_yolo_tid)
@@ -1665,6 +1842,9 @@ def main():
             # Removed KDS overlay on video feed (now displayed in dashboard)
             # ───────────────────────────────────────────────────────────────────
 
+            # Recording (RECORD_VIDEO): exactly the frame the dashboard shows.
+            if recorder is not None:
+                recorder.write(annotated)
             update_frame_data(
                 annotated,
                 state_machine.current_ticket,
@@ -1685,7 +1865,16 @@ def main():
                 # kept only if that order ends up WRONG (see FailureRecorder).
                 if failure_recorder is not None and failure_recorder.enabled:
                     active = kds_video.manager.active_group
-                    if active is not None or failure_recorder.active:
+                    # Compose while a card is merely *visible* too, so the
+                    # pre-roll covers the window between the card appearing and
+                    # the ticket being confirmed -- which is where the cheese
+                    # gets fetched.  Nothing is written to disk until a ticket
+                    # actually starts recording.
+                    if (
+                        active is not None
+                        or failure_recorder.active
+                        or kds_video.has_screen_content
+                    ):
                         status = "no active ticket"
                         if active is not None:
                             status = "TICKET %s   %d/%d hotdogs   %s" % (
@@ -1706,6 +1895,11 @@ def main():
                             for ticket_id in list(_pending_recordings):
                                 failure_recorder.start(ticket_id, dash_frame)
                                 _pending_recordings.discard(ticket_id)
+                            # After start(), so this frame arrives via write()
+                            # rather than twice -- once in the pre-roll flush
+                            # and once here.  It is buffered for whatever
+                            # ticket starts recording next.
+                            failure_recorder.observe(dash_frame)
                             failure_recorder.write(dash_frame)
 
             loop_ms = (time.perf_counter() - loop_start) * 1000.0
@@ -1744,6 +1938,17 @@ def main():
         import traceback; traceback.print_exc()
     finally:
         print("[DIAG] In finally block — main loop ended", flush=True)
+        # ── Finalise the recording before anything else can fail ─────────
+        try:
+            if recorder is not None:
+                _n = recorder.close()
+                print(f"[RECORD] wrote {_n} frames -> {recorder.path}"
+                      + (f" (stopped early: {recorder.error})" if recorder.error else ""),
+                      flush=True)
+        except NameError:
+            pass  # the loop failed before the recorder was created
+        except Exception as _rec_exc:
+            logger.warning("Failed to finalise recording: %s", _rec_exc)
         # ── Sync wrapping states before emitting final summary ────────────
         try:
             hotdog_tracker.sync_wrapping_states(wrapping_sm)

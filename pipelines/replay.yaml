@@ -1,0 +1,14 @@
+# No model, no GPU: replays recorded frames. Used by the tests and for
+# re-judging an old run after a rules change.
+source:
+  kind: replay
+  path: output/frames.jsonl
+zones: config/zones.json
+ticket:
+  json: config/kds_mock.json
+  index: 0
+engine:
+  dwell_s: 0.5
+extras:
+  advisory: false
+output: output/run_replay.json

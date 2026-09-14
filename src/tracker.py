@@ -1,11 +1,12 @@
-import numpy as np
+"""Moved to :mod:`src.analysis.tracker`.
 
-from src.detector import Detector
+Kept so existing imports (and anything outside this repo) keep working.
+Aliases the module object itself, so ``src.tracker`` and ``src.analysis.tracker`` are the
+same module -- no duplicated state, private names included.
+"""
+import sys
 
+from src.analysis.tracker import *  # noqa: F401,F403
+from src import analysis as _pkg
 
-class Tracker:
-    def __init__(self, model_path: str):
-        self.detector = Detector(model_path)
-
-    def update(self, frame: np.ndarray):
-        return self.detector.detect(frame)
+sys.modules[__name__] = getattr(_pkg, "tracker")
