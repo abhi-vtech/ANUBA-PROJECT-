@@ -47,7 +47,20 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# JPEG quality for the browser streams, and how long a generator may go
+# without sending anything before it repeats the last frame to keep the
+# connection alive.
+_STREAM_JPEG_QUALITY = 72
+_MJPEG_KEEPALIVE_S = 2.0
+
 _latest_frame: Optional[bytes] = None
+# Bumped on every new frame.  The MJPEG generators wait for this to change
+# rather than re-sending whatever is current: the pipeline produces ~8 fps, so
+# a generator ticking at 30 fps sent each frame about four times and pushed
+# ~6.7 MB/s of duplicates at the browser, which is what made the dashboard sit
+# there loading.
+_frame_seq: int = 0
+_kds_frame_seq: int = 0
 _latest_ticket: Optional[Any] = None
 _latest_order: Optional[Any] = None
 _latest_stats: Optional[Any] = None
@@ -122,11 +135,12 @@ def load_zones():
 
 
 def set_kds_state(state: dict) -> None:
-    """Publish the KDS FIFO queue / timeline for the live dashboard.
+    """Publish the KDS ticket queue and journeys for the live dashboard.
 
-    Called once per frame by src/main.py when the KDS video reader is active.
-    The payload is the output of TicketManager.dashboard_state() plus the
-    event timeline; see src/kds/fifo_queue.py.
+    Called once per frame by src/main.py when a KDS reader is active.  The
+    payload is `KdsOcrClient.dashboard_state()`: the ticket queue in the shape
+    the KDS panel renders, plus every ticket's journey for the Ticket journey
+    panel.  See src/kdsocr/client.py.
     """
     global _kds_state
     _kds_state = state or {}
@@ -142,13 +156,14 @@ def update_kds_frame(frame) -> None:
     Called from the KDS reader thread.  Encoding here (rather than in the
     route) keeps the stream cheap when several browsers are watching.
     """
-    global _latest_kds_frame
+    global _latest_kds_frame, _kds_frame_seq
     if frame is None:
         return
     try:
         ok, buf = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
         if ok:
             _latest_kds_frame = buf.tobytes()
+            _kds_frame_seq += 1
     except Exception:
         pass
 
@@ -171,6 +186,7 @@ def update_frame_data(
 ):
     global \
         _latest_frame, \
+        _frame_seq, \
         _latest_ticket, \
         _latest_order, \
         _latest_stats, \
@@ -181,8 +197,14 @@ def update_frame_data(
         _last_frame_time, \
         _hotdog_log, \
         _wrapping_done_ids
-    _, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+    # Quality 72 rather than 85: visually indistinguishable at dashboard size
+    # and roughly a third smaller on the wire, which matters because this frame
+    # is pushed to every open viewer continuously.
+    _, buf = cv2.imencode(
+        ".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, _STREAM_JPEG_QUALITY]
+    )
     _latest_frame = buf.tobytes()
+    _frame_seq += 1
     _latest_ticket = ticket
     _latest_order = order
     _latest_stats = stats
@@ -428,15 +450,37 @@ def _status_frame(message: str, width: int = 1280, height: int = 720) -> bytes:
 
 
 async def mjpeg_generator():
-    """Generate MJPEG stream."""
+    """Stream the annotated production frame, once per frame produced.
+
+    Waits for a NEW frame instead of re-sending the current one on a fixed
+    tick: the pipeline runs at well under 30 fps, so a fixed tick spent most of
+    its bandwidth retransmitting bytes the browser already had.
+    """
+    sent = -1
+    idle_since = time.time()
     while True:
-        frame = _latest_frame
-        if frame is None:
-            frame = _status_frame("Starting up - loading model, waiting for video")
-        yield (
-                b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + frame + b"\r\n"
-        )
-        await asyncio.sleep(0.033)  # ~30 FPS
+        if _latest_frame is None:
+            yield (
+                b"--frame\r\nContent-Type: image/jpeg\r\n\r\n"
+                + _status_frame("Starting up - loading model, waiting for video")
+                + b"\r\n"
+            )
+            await asyncio.sleep(0.5)
+            continue
+        if _frame_seq != sent:
+            sent = _frame_seq
+            idle_since = time.time()
+            yield (
+                b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + _latest_frame + b"\r\n"
+            )
+        elif time.time() - idle_since > _MJPEG_KEEPALIVE_S:
+            # A stalled pipeline must not look like a dead connection: resend
+            # the last frame occasionally so the browser keeps the stream open.
+            idle_since = time.time()
+            yield (
+                b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + _latest_frame + b"\r\n"
+            )
+        await asyncio.sleep(0.02)
 
 
 @app.get("/video")
@@ -452,11 +496,26 @@ _MJPEG_BOUNDARY = b"--frame\r\nContent-Type: image/jpeg\r\n\r\n"
 
 
 async def kds_mjpeg_generator():
-    """Generate the MJPEG stream of the KDS screen."""
+    """Stream the annotated KDS screen, once per frame produced.
+
+    Sends a placeholder until the reader publishes its first frame, so the
+    panel shows *something* rather than an image that loads forever.
+    """
+    sent = -1
+    idle_since = time.time()
     while True:
-        if _latest_kds_frame is not None:
+        if _latest_kds_frame is None:
+            yield _MJPEG_BOUNDARY + _status_frame("Waiting for the KDS screen") + b"\r\n"
+            await asyncio.sleep(0.5)
+            continue
+        if _kds_frame_seq != sent:
+            sent = _kds_frame_seq
+            idle_since = time.time()
             yield _MJPEG_BOUNDARY + _latest_kds_frame + b"\r\n"
-        await asyncio.sleep(0.1)  # the KDS screen changes slowly; ~10 FPS
+        elif time.time() - idle_since > _MJPEG_KEEPALIVE_S:
+            idle_since = time.time()
+            yield _MJPEG_BOUNDARY + _latest_kds_frame + b"\r\n"
+        await asyncio.sleep(0.05)
 
 
 @app.get("/kds_video")

@@ -38,17 +38,49 @@ half: true
 # size; lower it (e.g. 480) to trade accuracy for FPS on a loaded Jetson.
 imgsz: 640
 confidence_threshold: 0.5
-hotdog_conf_threshold: 0.55
+# Measured over 300 frames of the camA recording through the real Detector:
+# 144 hot-dog detections, 122 of them (85%) at >=0.90 -- a genuine hotdog is
+# detected with very high confidence.  Only ~12 sat in the 0.55-0.80 band, and
+# that band is where other objects get called hotdogs.  0.75 drops the weakest
+# 6% of detections while keeping 94%; raise to 0.85 (keeps 87%) if false
+# positives persist.
+hotdog_conf_threshold: 0.75
 wrapping_conf_threshold: 0.15
 wrapping_dwell_s: 0.1                  # wrapping detection overlap required for "About to Complete" (seconds)
 wrapping_min_closing_frames: 30        # minimum frames "About to Complete" stays active (~1 second)
 wrapping_done_delay_s: 1.0             # delay after hotdog becomes invisible before "Order Done" (seconds)
-kds_mode: mock              # mock | dynamic | video
+kds_mode: kdsocr            # kdsocr | none
+#
+# kdsocr: the KDS screen is read by the kds-ocr project
+# (github.com/anuba-technologies/kds-ocr) running as a child process.  It
+# streams one JSON recipe per emission -- ticket appeared, items changed,
+# ticket bumped -- and src/kdsocr/ turns those into the build requirement,
+# updates it in place when the ticket changes, and judges the order when the
+# ticket is bumped.  There is no card-disappearance rule on this side: the
+# reader reports the bump explicitly.
 # Used when kds_mode: video (or override with KDS_SOURCE).
 #   videos/KDS_Feed/ -> the KDS screen recording
 #   videos/KDS/      -> the matching kitchen camera (set as `source:` above)
 kds_source: videos/KDS_Feed/Wienerschnitzel_Sacramento_CA_95818__kds__2026_09_06_11_to_12_PDT.mkv
 kds_timeline: output/kds_timeline.jsonl
+
+# ── kds-ocr reader ─────────────────────────────────────────────────────────
+kdsocr_repo: kds-ocr             # checkout of anuba-technologies/kds-ocr,
+                                 # kept inside the project
+kdsocr_out: output/kdsocr        # where the reader writes its run files
+kdsocr_recipes: output/kdsocr/recipes.jsonl   # the stream we consume
+kdsocr_log: output/kdsocr/reader.log          # the child's own (verbose) log
+# EasyOCR on the GPU.  Effectively mandatory: torch on this Orin is ~40x
+# slower on the CPU for this workload.
+kdsocr_gpu: true
+# Bound a live (RTSP) run so it finalizes like a finished video. 0 = unbounded.
+kdsocr_live_seconds: 0
+# kds-ocr ingredient name -> our zone/class name.  Leave unset for the default.
+# kdsocr_ingredients: config/kdsocr_ingredients.yaml
+
+# Every ticket's full journey -- requirement changes, what was observed going
+# on, and the verdict -- appended as one JSON object per judged ticket.
+ticket_journeys: output/ticket_journeys.jsonl
 
 # Record the dashboard view (production feed + KDS feed) for every ticket and
 # KEEP the clip only when that order ends up WRONG.  Correct orders are
@@ -56,7 +88,13 @@ kds_timeline: output/kds_timeline.jsonl
 record_failures: true
 failure_clip_dir: output/failures
 failure_clip_fps: 10
-failure_clip_max_s: 900        # safety cap per clip
+failure_clip_max_s: 3600       # safety cap per clip, in WALL seconds.
+                               # Not video seconds: the pipeline runs at ~7.5fps
+                               # on a 30fps source, so 900s of wall time was
+                               # only ~3.7 min of footage and cut long tickets
+                               # short.  Hitting the cap no longer implies a
+                               # verdict -- the clip is filed when the order is
+                               # actually judged, flagged "truncated".
 
 # Idle mode: 1 disables it -- detection runs on every frame regardless of what
 # the KDS screen shows.  Set >1 to run YOLO on 1 frame in N while the screen is

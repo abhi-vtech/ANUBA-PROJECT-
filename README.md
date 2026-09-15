@@ -778,7 +778,10 @@ All config values can be overridden via environment variables (take precedence o
 | `FRAME_WIDTH` | `1280` | Target frame width |
 | `FRAME_HEIGHT` | `720` | Target frame height |
 | `FPS` | `30` | Playback pacing for file sources |
-| `KDS_MODE` | `mock` | KDS client mode (`mock` or `dynamic`) |
+| `KDS_MODE` | `kdsocr` | `kdsocr` reads the KDS screen with the kds-ocr project (see `src/kdsocr/README.md`); `none` is detection-only |
+| `KDS_SOURCE` | from `config/model.yaml` | KDS screen recording or `rtsp://…` |
+| `KDSOCR_REPO` | `kds-ocr` | checkout of `anuba-technologies/kds-ocr` |
+| `KDSOCR_GPU` | `true` | EasyOCR on the GPU; the CPU path is ~40x slower on this Orin |
 | `OPTICAL_FLOW_ENABLED` | `true` | Enable optical flow co-motion analysis |
 | `LOG_METRICS_INTERVAL` | `5` | Seconds between performance metric logs |
 | `LOG_LEVEL` | `WARNING` | Python log level (`DEBUG`, `INFO`, `WARNING`, `ERROR`) |

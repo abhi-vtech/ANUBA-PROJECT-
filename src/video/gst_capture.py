@@ -105,7 +105,7 @@ class GstVideoCaptureThread:
 
     backend = "nvv4l2decoder"
 
-    def __init__(self, source, target_width=None, target_height=None, fps=None, realtime=False):
+    def __init__(self, source, target_width=None, target_height=None, fps=None, realtime=False, start_at_s=0.0):
         if not _GST_OK:
             raise RuntimeError("GStreamer with the NVIDIA plugins is not importable")
         self.source = str(source)
@@ -124,6 +124,12 @@ class GstVideoCaptureThread:
         self.error: Optional[str] = None
         self.frames_delivered = 0
         self.last_pts_s = 0.0
+        # Seconds into the file to begin at.  Kept, not consumed: `_end_of_stream`
+        # rewinds here rather than to 0, so a looping run never replays the part
+        # of the recording the caller asked to skip.
+        self.start_at_s = float(start_at_s or 0.0) if not self._is_rtsp else 0.0
+        self._start_pts = int(self.start_at_s * Gst.SECOND) if self.start_at_s > 0 else 0
+        self.last_pts_s = self.start_at_s
 
         if self._is_file_source:
             codec, probed_fps, count = _probe_file(self.source)
@@ -170,6 +176,36 @@ class GstVideoCaptureThread:
         if ret == Gst.StateChangeReturn.FAILURE:
             self._pipeline.set_state(Gst.State.NULL)
             raise RuntimeError(f"hardware decode pipeline did not start: {self.pipeline_desc}")
+        # NOT the place to seek: seek_simple() blocks until the new position is
+        # prerolled, and a PAUSED pipeline with nobody pulling samples never
+        # gets there.  The seek is the reader thread's first action instead.
+
+    def _seek_to_start(self) -> bool:
+        """Jump to ``start_at_s``.  A no-op at 0 or on RTSP.
+
+        SNAP_BEFORE lands on the keyframe at or BEFORE the target, never after:
+        landing after it would silently skip footage the caller asked for, and
+        with keyframes tens of seconds apart in these recordings that is enough
+        to put the two feeds on different minutes.  The frames between the
+        keyframe and the target are then dropped in :meth:`_run`.
+
+        ACCURATE would land exactly and is deliberately not used: on this
+        decoder it never returns on an hour-long file.
+        """
+        if self.start_at_s <= 0:
+            return False
+        ok = self._pipeline.seek_simple(
+            Gst.Format.TIME,
+            Gst.SeekFlags.FLUSH | Gst.SeekFlags.KEY_UNIT | Gst.SeekFlags.SNAP_BEFORE,
+            int(self.start_at_s * Gst.SECOND),
+        )
+        if not ok:
+            logger.warning(
+                "Hardware decode could not seek %s to %.1fs; starting from 0",
+                self.source,
+                self.start_at_s,
+            )
+        return ok
 
     # ── Thread ───────────────────────────────────────────────────────────────
 
@@ -215,14 +251,28 @@ class GstVideoCaptureThread:
         else:
             self._looped = True  # realtime file: signal the loop boundary
         # Rewind, as the OpenCV capture does, for a caller that keeps reading.
-        self.last_pts_s = 0.0
+        self.last_pts_s = self.start_at_s
         if not self._pipeline.seek_simple(
-            Gst.Format.TIME, Gst.SeekFlags.FLUSH | Gst.SeekFlags.KEY_UNIT, 0
+            Gst.Format.TIME,
+            Gst.SeekFlags.FLUSH | Gst.SeekFlags.KEY_UNIT | Gst.SeekFlags.SNAP_BEFORE,
+            int(self.start_at_s * Gst.SECOND),
         ):
             time.sleep(0.1)
 
     def _run(self):
         timeout = Gst.SECOND // 5
+        # The seek belongs here, as this thread's first action, and nowhere
+        # else.  seek_simple() blocks until the new position is prerolled, so
+        # whichever thread calls it must not be a thread the pipeline needs in
+        # order to drain:
+        #   * from __init__ (PAUSED, no reader yet) nothing pulls samples, so
+        #     the preroll never completes;
+        #   * from start() after PLAYING it deadlocks on a race -- this reader
+        #     fills the 30-frame queue that the main loop is not consuming yet,
+        #     stops pulling, and the seek waits on a pull that never comes.
+        # Here nothing has been queued and nothing has been pulled, so neither
+        # can happen.
+        self._seek_to_start()
         while self._running:
             sample = self._sink.emit("try-pull-sample", timeout)
             if sample is None:
@@ -235,6 +285,14 @@ class GstVideoCaptureThread:
                 elif self._sink.get_property("eos"):
                     self._end_of_stream()
                 continue
+            # Finish the seek: SNAP_BEFORE lands on the keyframe at or before
+            # the requested offset, so discard what follows it until the media
+            # clock reaches the offset itself.  Dropped before _to_frame(), so
+            # nothing here pays for the BGR copy.
+            if self._start_pts:
+                buf_pts = sample.get_buffer().pts
+                if buf_pts != Gst.CLOCK_TIME_NONE and buf_pts < self._start_pts:
+                    continue
             started = time.time()
             frame = self._to_frame(sample)
             if frame is None:
@@ -285,7 +343,7 @@ class GstVideoCaptureThread:
         self._pipeline.set_state(Gst.State.NULL)
 
 
-def open_capture(source, target_width=None, target_height=None, fps=None, realtime=False, ingest="gstreamer"):
+def open_capture(source, target_width=None, target_height=None, fps=None, realtime=False, ingest="gstreamer", start_at_s=0.0):
     """Hardware decode when possible, otherwise the OpenCV capture.
 
     The returned object has a `backend` attribute ("nvv4l2decoder" or
@@ -298,11 +356,18 @@ def open_capture(source, target_width=None, target_height=None, fps=None, realti
             logger.warning("Hardware video decode unavailable (GStreamer / NVIDIA plugins not importable); using OpenCV")
         else:
             try:
-                return GstVideoCaptureThread(source, target_width, target_height, fps, realtime)
+                return GstVideoCaptureThread(
+                    source, target_width, target_height, fps, realtime, start_at_s=start_at_s
+                )
             except (ValueError, RuntimeError) as exc:
                 logger.warning("Hardware video decode not used for %s: %s; using OpenCV", source, exc)
     capture = VideoCaptureThread(
-        source, target_width=target_width, target_height=target_height, fps=fps, realtime=realtime
+        source,
+        target_width=target_width,
+        target_height=target_height,
+        fps=fps,
+        realtime=realtime,
+        start_at_s=start_at_s,
     )
     capture.backend = "opencv"
     return capture

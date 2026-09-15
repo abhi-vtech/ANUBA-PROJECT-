@@ -1,0 +1,98 @@
+# ---------------------------------------------------------------------------
+# kds-ocr ingredient name  ->  our canonical ingredient name.
+#
+# kds-ocr spells ingredients the way the Wienerschnitzel Operations Manual
+# does ("chili", "american cheese").  We spell them the way the bin zones in
+# config/zones.json and the YOLO classes in deepstream_test/labels.txt do
+# ("chilli", "yellow cheese (sliced)").  Not one name matches by accident, so
+# every ingredient we intend to verify must appear in `map` below.
+#
+# This file is the ONLY place that correspondence is defined.  Adding an
+# ingredient is a config edit, not a code change.
+#
+# Values are passed through src.domain.schemas.canonical_ingredient(), so
+# either spelling of a name works here ("yellow cheese (sliced)" and
+# "yellow_cheese" both land on `yellow_cheese`).
+# ---------------------------------------------------------------------------
+
+version: 1
+
+# An ingredient we can actually observe: it is either a bin zone a hand
+# reaches into, or a YOLO class the detector emits.
+map:
+  # --- bin zones ---------------------------------------------------------
+  chili:              "chilli"
+  american cheese:    "yellow cheese (sliced)"
+  shredded cheddar:   "grated yellow cheese"
+  onion:              "onions"
+  diced onion:        "onions"
+  grilled onions:     "grilled onions"
+  relish:             "relish"
+  tomato half:        "tomato"
+  tomato:             "tomato"
+  pickle spear:       "pickel swears"     # sic: the zone name is misspelled
+  pickle chips:       "pickles (rounds)"
+  sport peppers:      "sport (wax) peppers"
+  sauerkraut:         "sauerkraut"
+  sauerkraut (on request): "sauerkraut"
+  swiss cheese:       "swiss cheese"
+  pastrami:           "pastrami"
+  jalapeno poppers:   "jalapenos"
+
+  # --- YOLO detector classes --------------------------------------------
+  mustard:            "yellow_mustard_sauce"
+  ketchup:            "ketchup"
+
+# ---------------------------------------------------------------------------
+# BASE COMPONENTS -- every hot dog has these by definition.
+#
+# The bun and the sausage itself are not toppings a crew member can forget
+# independently: if they were missing there would be no hot dog at all.  So
+# they are covered by the HOTDOG COUNT (`required_hotdogs`), not by an
+# ingredient check, and they are dropped silently here -- not required, and
+# not reported as "not checkable" either, because listing "bun" against every
+# single ticket is noise that buries the toppings that do matter.
+#
+# The dog VARIANT (all beef / polish / veggie) lives here for the same reason
+# plus a second one: the detector has a single undifferentiated `hot-dog`
+# class, so the variant is unknowable anyway.  We count dogs; we do not tell
+# them apart.
+#
+# NOTE: `polish dog` sits here even though a `polish hot dog` bin zone exists
+# and could in principle be observed.  Move that one line back into `map`
+# above if you later want the polish bin checked as a topping.
+base:
+  - hot dog
+  - all beef dog
+  - polish dog
+  - veggie dog
+  - corn dog
+  - bun
+  - rye slice
+  - 10in tortilla
+
+# Ingredients kds-ocr legitimately reports that we have no way to observe and
+# that are NOT part of every build -- a crew member really can forget these,
+# we simply cannot see it.  They are carried into the verdict as
+# "not checkable" rather than silently passed: a missing signal must never
+# read as compliance.
+unverifiable:
+  - celery salt
+  - bbq sauce
+  - bacon
+  - mayo
+  - ranch
+  - ranch cup
+  - sauce cup
+  - lettuce
+  - beef patty
+  - hamburger patty
+  - protein (ambiguous, see b11)
+  # Read off the ticket but not part of a hot-dog build.
+  - fries
+  - mini corn dogs
+  - chicken tenders
+  - jalapeno poppers 6
+  - chocolate shake syrup
+  - crumbled oreos
+  - reeses peanut butter cup pieces

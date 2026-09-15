@@ -40,8 +40,12 @@ def app_root() -> Path:
     candidate = Path(sys.argv[0]).resolve().parent.parent
     if (candidate / "config").is_dir() and (candidate / "templates").is_dir():
         return candidate
-    # Dev: this file is at <repo>/Internal/src/paths.py, so app_root is Internal/.
-    return Path(__file__).resolve().parent.parent
+    # Dev: this file is at <repo>/Internal/src/domain/paths.py, so app_root is
+    # three levels up.  It was two while the file lived at src/paths.py; after
+    # the move that returned Internal/src, and every caller whose argv[0] sits
+    # outside the repo (a scratch script, a probe) silently resolved config to
+    # Internal/src/config and failed on a missing file.
+    return Path(__file__).resolve().parents[2]
 
 
 def resource(rel: str) -> str:

@@ -31,9 +31,12 @@ nms-iou-threshold=0.45
 pre-cluster-threshold=0.5
 topk=300
 
-# class 6 = hot-dog -> hotdog_conf_threshold in model.yaml
+# class 6 = hot-dog -> hotdog_conf_threshold in model.yaml.  Kept low here on
+# purpose: the host applies the real gate when it replays these detections, so
+# leaving headroom means the threshold can be retuned without re-running the
+# model over the whole video.
 [class-attrs-6]
-pre-cluster-threshold=0.55
+pre-cluster-threshold=0.40
 
 # wrapping-related classes -> wrapping_conf_threshold in model.yaml
 # 0=black_clamshell 3=closed_reg_clamshell 9=reg_clamshell 12=white_clamshell 14=wrapper

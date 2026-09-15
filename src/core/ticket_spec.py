@@ -8,11 +8,13 @@ genuinely needs a total.
 
 Two front doors, one output:
 
-    from_json(dict)         config/kds_mock.json, and any ticket POSTed as JSON
-    from_snapshot(snapshot) src.kds.schemas.TicketSnapshot, straight off OCR
+    from_json(dict)         any ticket supplied as JSON
 
-Both normalise item names through `src.core.naming.normalize_item_name`, so
-"Pickles (Rounds)" from OCR and "pickle_rounds" from JSON land on one key.
+Item names are normalised through `src.core.naming.normalize_item_name`, so
+"Pickles (Rounds)" and "pickle_rounds" land on one key.
+
+The OCR front door (`from_snapshot`) was removed with src/kds/; a replacement
+reader must supply tickets through `from_json` or add its own constructor.
 """
 from __future__ import annotations
 
@@ -212,55 +214,4 @@ class TicketSpec:
             groups=groups,
             unverifiable=sorted(set(unverifiable)),
             source="json",
-        )
-
-    @classmethod
-    def from_snapshot(cls, snapshot: Any, known_items: Optional[Iterable[str]] = None) -> "TicketSpec":
-        """Build from an OCR `TicketSnapshot` without importing the OCR stack.
-
-        Reads only the attributes `src.kds.schemas.TicketSnapshot` guarantees,
-        so this module stays importable on a machine with no cv2.  Unknown
-        shortcuts are carried through as groups with no items: we still require
-        the hotdog to exist, but we assert nothing about its add-ons (RULE 4).
-        """
-        known = set(known_items) if known_items is not None else None
-        groups: List[GroupSpec] = []
-        unverifiable: List[str] = []
-
-        for hotdog in getattr(snapshot, "hotdogs", []) or []:
-            items: List[ItemReq] = []
-            for addon in getattr(hotdog, "addons", []) or []:
-                raw_name = getattr(addon, "ingredient", None) or getattr(addon, "key", "")
-                name = normalize_item_name(str(raw_name))
-                if not name:
-                    continue
-                if known is not None and name not in known:
-                    unverifiable.append(name)
-                    continue
-                items.append(ItemReq(
-                    name=name,
-                    qty=max(1, int(getattr(addon, "quantity", 1) or 1)),
-                    negated=bool(getattr(addon, "negation", False)),
-                ))
-            for raw_name in getattr(hotdog, "ingredients", []) or []:
-                name = normalize_item_name(str(raw_name))
-                if not name or any(i.name == name for i in items):
-                    continue
-                if known is not None and name not in known:
-                    unverifiable.append(name)
-                    continue
-                items.append(ItemReq(name=name, qty=1))
-            groups.append(GroupSpec(
-                group_id=str(getattr(hotdog, "shortcut", "") or getattr(hotdog, "item", "group")),
-                variant=str(getattr(hotdog, "item", "")),
-                quantity=max(1, int(getattr(hotdog, "quantity", 1) or 1)),
-                items=items,
-            ))
-
-        return cls(
-            ticket_id=str(getattr(snapshot, "ticket_id", "unknown")),
-            shortcut=str(getattr(snapshot, "order_type", "")),
-            groups=groups,
-            unverifiable=sorted(set(unverifiable)),
-            source="ocr",
         )

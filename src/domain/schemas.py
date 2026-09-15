@@ -24,6 +24,89 @@ SAUCE_CLASSES: Set[str] = {"ketchup_sauce", "yellow_mustard_sauce"}
 DISH_CLASSES: Set[str] = {"hot-dog", "burger_bun", "french_fries"}
 
 
+# ---------------------------------------------------------------------------
+# Ingredient naming
+#
+# The same ingredient is spelled differently depending on where it comes from:
+# the KDS shortcut config calls it "ketchup_sauce", the detector class is
+# "ketchup_sauce", and the pick pipeline records it as "ketchup".  Anything that
+# compares a REQUIRED ingredient against a DETECTED one has to put both through
+# here first, or the comparison silently never matches -- which is exactly how
+# the dashboard checklist came to show ketchup stuck at 0 while mustard ticked
+# up, mustard being one of the names that happens to survive unchanged.
+#
+# Lives here, in the module both the order pipeline and the KDS side already
+# import, so there is one vocabulary rather than one per caller.
+# ---------------------------------------------------------------------------
+def canonical_ingredient(name: str) -> str:
+    """Helper to normalize names using canonical mappings (handles casing, underscores, spaces, aliases)."""
+    if not name:
+        return ""
+
+    # Initial cleaning: lower case, strip, replace multiple spaces/underscores
+    cleaned = name.lower().replace("_", " ").strip()
+
+    # Direct canonical names lookup
+    canonical_map = {
+        "yellow mustard sauce": "yellow_mustard_sauce",
+        "yellow_mustard_sauce": "yellow_mustard_sauce",
+        "yellow mustard": "yellow_mustard_sauce",
+        "yellow_mustard": "yellow_mustard_sauce",
+
+        "pickles (rounds)": "pickle_rounds",
+        "pickle rounds": "pickle_rounds",
+        "pickles rounds": "pickle_rounds",
+        "pickle round": "pickle_rounds",
+
+        "pickles (spears)": "pickle_spears",
+        "pickle spears": "pickle_spears",
+        "pickles spears": "pickle_spears",
+        "pickle spear": "pickle_spears",
+        "pickel swears": "pickle_spears",
+        "pickle swears": "pickle_spears",
+
+        "diced onions": "diced_onions",
+        "diced onion": "diced_onions",
+        "onions": "onions",
+        "onion": "onions",
+
+        "yellow cheese": "yellow_cheese",
+        "yellow cheese (sliced)": "yellow_cheese",
+        "yellow cheese sliced": "yellow_cheese",
+
+        "grated yellow cheese": "grated_yellow_cheese",
+        "chilli grated yellow cheese": "grated_yellow_cheese",
+
+        "tomato": "tomato",
+        "tomatoes": "tomato",
+
+        "swiss cheese": "swiss_cheese",
+        "relish": "relish",
+        "ketchup sauce": "ketchup",
+        "ketchup": "ketchup",
+
+        "sport (wax) peppers": "sport_peppers",
+        "sport peppers": "sport_peppers",
+        "sport wax peppers": "sport_peppers",
+        "wax peppers": "sport_peppers",
+    }
+
+    # If it matches a key in the map, return the mapped value
+    if cleaned in canonical_map:
+        return canonical_map[cleaned]
+
+    # Fallback to standard word cleaning
+    if "(" in cleaned:
+        cleaned = cleaned.split("(")[0].strip()
+    words = cleaned.split()
+    cleaned_words = []
+    for w in words:
+        if w.endswith("s") and w != "swiss":
+            w = w[:-1]
+        cleaned_words.append(w)
+    return "_".join(cleaned_words)
+
+
 @dataclass
 class Detection:
     track_id: int

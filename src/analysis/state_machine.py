@@ -4,7 +4,14 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 
 import logging
-from src.domain.schemas import Action, Order, OrderStatus, Stats, Ticket
+from src.domain.schemas import (
+    Action,
+    Order,
+    OrderStatus,
+    Stats,
+    Ticket,
+    canonical_ingredient,
+)
 from src.analysis.batch_validator import BatchOrderValidator, normalize_item_name
 from src.analysis.cheese_gate import CHEESE_KEYS
 from src.domain.ingredient_config import is_granular
@@ -322,73 +329,59 @@ class OrderStateMachine:
         self.calculate_validation(self.current_order, is_final=False)
 
 
-    def _normalize(self, name: str) -> str:
-        """Helper to normalize names using canonical mappings (handles casing, underscores, spaces, aliases)."""
-        if not name:
-            return ""
+    def update_ticket_requirements(self, ticket: Ticket) -> bool:
+        """Re-point the order in progress at a CHANGED ticket.
 
-        # Initial cleaning: lower case, strip, replace multiple spaces/underscores
-        cleaned = name.lower().replace("_", " ").strip()
+        The crew edits orders on the KDS while the food is being made, so the
+        requirement is not fixed at creation: kds-ocr re-emits the whole ticket
+        whenever its items change, and this applies that new requirement to the
+        order already open.
 
-        # Direct canonical names lookup
-        canonical_map = {
-            "yellow mustard sauce": "yellow_mustard_sauce",
-            "yellow_mustard_sauce": "yellow_mustard_sauce",
-            "yellow mustard": "yellow_mustard_sauce",
-            "yellow_mustard": "yellow_mustard_sauce",
+        Progress is deliberately KEPT.  `picked_counts` records what was
+        physically observed going on, which an edit to the ticket does not
+        undo -- so it carries over, and `remaining_counts` is recomputed as
+        "what the new ticket asks for, less what we have already seen".
+        Rebuilding the order instead (as `on_kds_ticket` does for a fresh
+        ticket) would discard that evidence and judge the order on only the
+        part built after the edit.
 
-            "pickles (rounds)": "pickle_rounds",
-            "pickle rounds": "pickle_rounds",
-            "pickles rounds": "pickle_rounds",
-            "pickle round": "pickle_rounds",
+        Returns True when the update was applied.
+        """
+        if ticket is None or self.current_ticket is None:
+            return False
+        if ticket.ticket_id != self.current_ticket.ticket_id:
+            # An update for some other ticket: the FIFO source is responsible
+            # for only sending updates for the open one.
+            return False
+        if self.current_order.status != OrderStatus.IN_PROGRESS:
+            return False
 
-            "pickles (spears)": "pickle_spears",
-            "pickle spears": "pickle_spears",
-            "pickles spears": "pickle_spears",
-            "pickle spear": "pickle_spears",
-            "pickel swears": "pickle_spears",
-            "pickle swears": "pickle_spears",
-
-            "diced onions": "diced_onions",
-            "diced onion": "diced_onions",
-            "onions": "onions",
-            "onion": "onions",
-
-            "yellow cheese": "yellow_cheese",
-            "yellow cheese (sliced)": "yellow_cheese",
-            "yellow cheese sliced": "yellow_cheese",
-
-            "grated yellow cheese": "grated_yellow_cheese",
-            "chilli grated yellow cheese": "grated_yellow_cheese",
-
-            "tomato": "tomato",
-            "tomatoes": "tomato",
-
-            "swiss cheese": "swiss_cheese",
-            "relish": "relish",
-            "ketchup sauce": "ketchup",
-            "ketchup": "ketchup",
-
-            "sport (wax) peppers": "sport_peppers",
-            "sport peppers": "sport_peppers",
-            "sport wax peppers": "sport_peppers",
-            "wax peppers": "sport_peppers",
+        expected_items, counts, total_hotdogs = _extract_ticket_counts(ticket)
+        order = self.current_order
+        order.expected_items = expected_items
+        order.required_counts = dict(counts)
+        order.hotdog_count = total_hotdogs
+        order.remaining_counts = {
+            item: max(0, qty - order.picked_counts.get(item, 0))
+            for item, qty in counts.items()
         }
+        self.current_ticket = ticket
 
-        # If it matches a key in the map, return the mapped value
-        if cleaned in canonical_map:
-            return canonical_map[cleaned]
+        # Carry the observations across the rebuild, or the new validator
+        # starts blind and every already-applied ingredient reads as missing.
+        observed = dict(self.batch_validator.observed_counts) if self.batch_validator else {}
+        self.batch_validator = BatchOrderValidator(ticket, strict_no_extras=False)
+        self.batch_validator.observed_counts.update(observed)
+        self.calculate_validation(order, is_final=False)
+        return True
 
-        # Fallback to standard word cleaning
-        if "(" in cleaned:
-            cleaned = cleaned.split("(")[0].strip()
-        words = cleaned.split()
-        cleaned_words = []
-        for w in words:
-            if w.endswith("s") and w != "swiss":
-                w = w[:-1]
-            cleaned_words.append(w)
-        return "_".join(cleaned_words)
+    def _normalize(self, name: str) -> str:
+        """Normalize an ingredient name to its canonical form.
+
+        Delegates to :func:`src.domain.schemas.canonical_ingredient` so the KDS
+        side resolves names identically; see the note there.
+        """
+        return canonical_ingredient(name)
 
     def on_action(self, action: Action) -> Optional[str]:
         if self.current_ticket is None:
@@ -543,6 +536,21 @@ class OrderStateMachine:
 
 
 
+    def abandon_current_order(self) -> Optional[Order]:
+        """Drop the order in progress WITHOUT judging it.
+
+        For a ticket that stopped being verifiable after we opened it -- the
+        crew voided it, or edited every hot dog off it.  It is not judged,
+        because there is no longer a requirement to judge it against; it is
+        simply released so the next ticket can start.
+        """
+        if self.current_ticket is None:
+            return None
+        if self.current_order.status != OrderStatus.IN_PROGRESS:
+            return None
+        self._abandon_current_order()
+        return self.history[-1]
+
     def _abandon_current_order(self):
         """Finalize the current order as ABANDONED when a new ticket arrives."""
         self._finalize_order(OrderStatus.ABANDONED)
@@ -566,11 +574,17 @@ class OrderStateMachine:
         # Run final validation
         self.calculate_validation(self.current_order, is_final=(status == OrderStatus.COMPLETED))
 
-        self.stats.total_orders += 1
-        if self.current_order.passed:
-            self.stats.passed_orders += 1
-        else:
-            self.stats.failed_orders += 1
+        # An ABANDONED order was never judged -- the ticket stopped being
+        # verifiable after we opened it (voided, or every hot dog edited off
+        # it).  Counting it as failed would inflate the error rate with orders
+        # nobody got wrong, and hide the real failures among them.  Accuracy is
+        # reported over the orders we actually checked.
+        if status != OrderStatus.ABANDONED:
+            self.stats.total_orders += 1
+            if self.current_order.passed:
+                self.stats.passed_orders += 1
+            else:
+                self.stats.failed_orders += 1
 
         self.history.append(self.current_order)
 
