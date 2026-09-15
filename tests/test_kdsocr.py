@@ -301,7 +301,7 @@ class TestJourney(unittest.TestCase):
         self.assertIsNotNone(j)
 
 
-    def test_fragmented_tracks_do_not_inflate_hotdog_progress(self):
+    def test_repeated_wrapping_events_collapse_to_distinct_tracks(self):
         # One hotdog fragments into several track ids and fires a wrapping
         # "done" for each. Counting events showed a 3-dog ticket as 6/3 and
         # drove the dashboard progress bar past 100%.
@@ -310,14 +310,14 @@ class TestJourney(unittest.TestCase):
         for tid in (1, 2, 1, 1, 8, 2, 2):
             j.add(HOTDOG, 1.0, track_id=tid)
         self.assertEqual(sum(1 for s in j.steps if s.kind == HOTDOG), 7)
-        self.assertEqual(j.hotdogs_made(), 3)
+        self.assertEqual(j.wrapped_tracks(), 3)
 
     def test_hotdog_steps_without_a_track_id_are_not_counted(self):
         log = JourneyLog(path=None)
         j = log.start("CHK-61")
         j.add(HOTDOG, 1.0)                 # no track_id
         j.add(HOTDOG, 2.0, track_id=5)
-        self.assertEqual(j.hotdogs_made(), 1)
+        self.assertEqual(j.wrapped_tracks(), 1)
 
     def test_wrong_verdicts_are_written_to_disk(self):
         with tempfile.TemporaryDirectory() as d:

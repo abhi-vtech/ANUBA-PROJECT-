@@ -84,11 +84,20 @@ class TicketJourney:
                 return dict(step.detail.get("counts") or {})
         return {}
 
-    def hotdogs_made(self) -> int:
-        """Distinct hotdog tracks finished, not wrapping events.
+    def wrapped_tracks(self) -> int:
+        """Distinct hotdog TRACKS seen wrapped -- an upper bound, not a count.
 
-        One hotdog fragments into several track ids over its life and fires a
-        "done" for each, so counting events over-reports what was made.
+        Deliberately not called "hotdogs made".  Counting wrapping events
+        over-reports badly (one dog fires several), and de-duplicating by
+        track id is only a partial fix: the tracker fragments a single
+        physical hotdog across many ids, so a verified 3-dog ticket measured
+        11 distinct tracks on camA.  `src/core/order_rules.py` treats the same
+        signal the same way -- EXTRA_HOTDOG is explicitly not a failure on its
+        own "because tracker fragmentation inflates this".
+
+        Useful as evidence that wrapping happened and roughly when; useless as
+        a quantity.  Anything needing a real count must wait for the tracker to
+        stop fragmenting.
         """
         return len({s.detail.get("track_id") for s in self.steps
                     if s.kind == HOTDOG and s.detail.get("track_id") is not None})
@@ -116,7 +125,9 @@ class TicketJourney:
             "not_checkable": list(self.not_checkable),
             "requirement": self.requirement_now(),
             "observed": self.observed_now(),
-            "hotdogs_made": self.hotdogs_made(),
+            # An upper bound inflated by track fragmentation -- named for what
+            # it measures, so no reader mistakes it for a hotdog count.
+            "wrapped_tracks": self.wrapped_tracks(),
             "steps": [s.to_dict() for s in self.steps],
         }
 

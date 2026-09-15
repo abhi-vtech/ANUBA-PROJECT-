@@ -385,13 +385,11 @@ class KdsOcrClient:
         em = self._latest.get(ref)
         j = self.journeys.get(ref)
         observed = j.observed_now() if j is not None else {}
-        # DISTINCT tracks, not wrapping events. A single hotdog fragments into
-        # several track ids and fires a "done" for each, which showed a 3-dog
-        # ticket as 6/3 and drove the progress bar past 100%. This mirrors
-        # `OrderValidator.observe_hotdog`, which is idempotent per track id.
-        made = len({st.detail.get("track_id")
-                    for st in (j.steps if j is not None else [])
-                    if st.kind == HOTDOG and st.detail.get("track_id") is not None})
+        # Distinct tracks, not wrapping events -- and still only an upper
+        # bound, because the tracker fragments one physical hotdog across many
+        # ids (a 3-dog ticket measured 11 on camA). Capped below so the bar
+        # reads as progress rather than claiming a count we cannot support.
+        made = j.wrapped_tracks() if j is not None else 0
         expected = em.total_dogs if em else 0
         hotdogs = []
         for g in (em.groups if em else []):
