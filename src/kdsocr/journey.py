@@ -209,7 +209,11 @@ class JourneyLog:
             parent = os.path.dirname(self.path)
             if parent:
                 os.makedirs(parent, exist_ok=True)
-            with open(self.path, "a") as fh:
+            # Explicit UTF-8: the default encoding is the code page on Windows,
+            # which cannot hold the em dash the verdict messages are written
+            # with, so the character reached the file as U+FFFD and the reason
+            # an order failed came back mojibake.
+            with open(self.path, "a", encoding="utf-8") as fh:
                 fh.write(json.dumps(j.to_dict(), default=str) + "\n")
         except OSError:
             # A full or read-only disk must not end the run.

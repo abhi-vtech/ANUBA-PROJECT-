@@ -240,8 +240,31 @@ class OrderStateMachine:
             )
             return 0
 
+        required = (
+            self.batch_validator.required_counts
+            if self.batch_validator
+            else self.current_order.required_counts
+        )
+        wanted_cheese = sorted(k for k in required if k in CHEESE_KEYS)
+
         applied = 0
         for take in takes:
+            # A take from BEFORE this ticket existed is credited to the cheese
+            # the ticket asks for, not to the well it was tagged with.
+            #
+            # The trip is the evidence, and the trip is all the evidence there
+            # is: the slice was carried out of the cheese region seconds before
+            # the ticket reached the head of the queue, so which well it came
+            # from says nothing about whether this order got its cheese -- and
+            # a well read as the neighbouring one then failed an order whose
+            # cheese was on the dog.  One trip settles the requirement however
+            # many slices it was, because a worker picks several at once.
+            #
+            # A LIVE take keeps its own well, so a swiss slice put on a
+            # yellow-cheese ticket while that ticket is being made is still a
+            # wrong ingredient.
+            credit_to = wanted_cheese if (pre_confirmation and wanted_cheese) else [take.item]
+
             # Same debounce as the discrete branch of on_action: a region exit
             # is already a completed carry, so the short window only guards
             # against one slice being reported twice.
@@ -250,30 +273,46 @@ class OrderStateMachine:
                 continue
             self.last_debounced_ts[take.item] = take.timestamp
 
-            self.current_order.picked_counts[take.item] = (
-                self.current_order.picked_counts.get(take.item, 0) + 1
-            )
-            if self.batch_validator:
-                self.batch_validator.on_place_event(take.item)
+            for item in credit_to:
+                self.current_order.picked_counts[item] = (
+                    self.current_order.picked_counts.get(item, 0) + 1
+                )
+                if self.batch_validator:
+                    self.batch_validator.on_place_event(item)
+
+            # The journey exists to explain a WRONG verdict, so the take that
+            # caused one has to be in it.  Counting it here but recording
+            # nothing leaves the journey showing the opposite of the verdict:
+            # while the gate owns cheese, `on_action` drops the bin events --
+            # but those are still written as journey steps, so a ticket judged
+            # wrong for a sliced-yellow take reads as two grated-yellow places
+            # and no sliced at all, which is evidence against its own verdict.
+            client = self._kds_client
+            if client is not None and hasattr(client, "record_place"):
+                for item in credit_to:
+                    client.record_place(
+                        self.current_order.ticket_id, item,
+                        take.timestamp, zone=take.well,
+                    )
             applied += 1
 
-            required = (
-                self.batch_validator.required_counts
-                if self.batch_validator
-                else self.current_order.required_counts
-            )
-            wanted = sorted(k for k in required if k in CHEESE_KEYS)
-            if take.item in wanted:
+            if pre_confirmation and wanted_cheese:
                 logger.info(
-                    "Cheese %s: %s from %r -> ticket %s",
-                    "replayed" if pre_confirmation else "added",
+                    "Cheese replayed onto ticket %s: a trip out of the cheese "
+                    "region at t=%.1f (well read as %r) credits %s",
+                    self.current_order.ticket_id, take.timestamp, take.well,
+                    ", ".join(credit_to),
+                )
+            elif take.item in wanted_cheese:
+                logger.info(
+                    "Cheese added: %s from %r -> ticket %s",
                     take.item, take.well, self.current_order.ticket_id,
                 )
             else:
                 logger.warning(
                     "WRONG CHEESE on ticket %s: %s taken from %r, ticket asks for %s",
                     self.current_order.ticket_id, take.item, take.well,
-                    ", ".join(wanted) if wanted else "no cheese",
+                    ", ".join(wanted_cheese) if wanted_cheese else "no cheese",
                 )
 
         if applied:
@@ -625,17 +664,13 @@ class OrderStateMachine:
             order.passed = result_dict["passed"]
             order.missing_items = list(result_dict["missing"].keys())
             order.extra_items = list(result_dict["extra"].keys())
-            wrong = [item for item in result_dict["extra"].keys() if item not in self.batch_validator.required_counts]
-            order.wrong_items = wrong
-
-            if wrong and order.extra_items:
-                order.validation_message = "Wrong + Extra Ingredients"
-                order.passed = False
-            elif wrong:
-                order.validation_message = "Wrong Ingredients"
-                order.passed = False
-            else:
-                order.validation_message = result_dict["message"]
+            # Extras are carried for the dashboard and the journey, but they no
+            # longer decide anything: the order is verified once the required
+            # items are all present, and something added on top of that does
+            # not take the verification away.  Only `missing` fails an order,
+            # so the message comes straight from the validator.
+            order.wrong_items = list(result_dict["extra"].keys())
+            order.validation_message = result_dict["message"]
 
             order.dashboard_slots = self.batch_validator.distribute_for_dashboard(result_dict["missing"])
             details = []
@@ -716,7 +751,10 @@ class OrderStateMachine:
         record = self._order_record(order)
         p = Path(self._history_path)
         p.parent.mkdir(parents=True, exist_ok=True)
-        with open(p, "a") as f:
+        # Explicit UTF-8 for the same reason as the journey file: the record
+        # carries the validation message, and the default encoding on Windows
+        # cannot hold the em dash in it.
+        with open(p, "a", encoding="utf-8") as f:
             f.write(json.dumps(record) + "\n")
 
     def _order_record(self, order: Order) -> dict:

@@ -95,7 +95,7 @@ from src.analysis.hotdog_tracker import (
 from src.analysis.wrapping_state import WrappingStateMachine
 from src.analysis.temporal import TemporalTracker
 # ── Cheese pre-gate (additive — do not remove) ────────────────────────────────
-from src.analysis.cheese_gate import CheesePreGate
+from src.analysis.cheese_gate import CHEESE_KEYS, CheesePreGate
 from src.domain.zones import ZoneManager
 from src.video.video_recorder import recorder_from_env
 
@@ -1089,8 +1089,15 @@ def main():
                 default_recording_path("dashboard")
             ).replace(".mkv", "_dashboard.mkv")
         _dash_record_path = str(_dash_record_path)
+        # Two recorders, one contract.  The Jetson's drives a hidden Xorg and
+        # Firefox through GStreamer; the Windows one drives the installed
+        # Chrome through Playwright.  Both take the same flags and leave the
+        # same sidecar, so everything downstream -- and the clipping in
+        # particular -- is the same either way.
+        _rec_script = ("scripts/record_dashboard_win.py" if sys.platform == "win32"
+                       else "scripts/record_dashboard.py")
         _rec_cmd = [
-            sys.executable, str(resource("scripts/record_dashboard.py")),
+            sys.executable, str(resource(_rec_script)),
             "--url", "http://127.0.0.1:%d/" % int(os.environ.get("DASHBOARD_PORT", "8000")),
             "--out", _dash_record_path,
             "--size", "%dx%d" % (int(_env("RECORD_DASHBOARD_WIDTH", 1920, int)),
@@ -1100,7 +1107,14 @@ def main():
             "--while-pid", str(os.getpid()),
         ]
         try:
-            dashboard_recorder = subprocess.Popen(_rec_cmd, start_new_session=True)
+            # CREATE_NEW_PROCESS_GROUP is what makes CTRL_BREAK_EVENT
+            # deliverable to the recorder at shutdown; without it the call is
+            # rejected and the only way to stop it would be a kill, which is
+            # exactly what loses the video.
+            _rec_kwargs = ({"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
+                           if sys.platform == "win32"
+                           else {"start_new_session": True})
+            dashboard_recorder = subprocess.Popen(_rec_cmd, **_rec_kwargs)
             logger.info("Recording the dashboard window to %s (pid %d)",
                         _dash_record_path, dashboard_recorder.pid)
         except OSError:
@@ -1134,7 +1148,13 @@ def main():
     # replayed when the ticket confirms.
     cheese_gate = CheesePreGate(
         zones,
-        lookback_s=float(_env("CHEESE_LOOKBACK_S", config.get("cheese_lookback_s", 120.0))),
+        # 30s, not 120s: this is how far back a cheese trip can be and still be
+        # credited to the ticket that follows it.  Two minutes reached back past
+        # whole orders -- CHK-254 inherited a take from 68s before it existed and
+        # was failed for a cheese it never touched.  Half a minute covers the
+        # real case, a slice fetched while the ticket was still coming up the
+        # queue, without reaching into the order before it.
+        lookback_s=float(_env("CHEESE_LOOKBACK_S", config.get("cheese_lookback_s", 30.0))),
         enabled=str(_env("CHEESE_GATE", config.get("cheese_gate", True))).lower()
         not in ("false", "0", "no"),
     )
@@ -1253,11 +1273,15 @@ def main():
                         _ref,
                         correct=bool(_order.passed),
                         message=_order.validation_message,
-                        # The shortfall, not the requirement: "1x chilli" must
-                        # mean one still missing, not one was needed.
-                        missing={k: v - _order.picked_counts.get(k, 0)
+                        # Only what never arrived.  A required ingredient seen
+                        # fewer times than the ticket's quantity is still on
+                        # the dog, and the observed number counts detections
+                        # rather than applications, so a shortfall against it
+                        # is not evidence of anything.  Matches the presence
+                        # test in BatchOrderValidator.validate.
+                        missing={k: v
                                  for k, v in _order.required_counts.items()
-                                 if v > _order.picked_counts.get(k, 0)},
+                                 if _order.picked_counts.get(k, 0) == 0},
                         extras=[{"item": i} for i in (_order.extra_items or [])],
                         t=current_time,
                     )
@@ -1858,7 +1882,16 @@ def main():
                         # nobody ordered.
                         _item = canonical_ingredient(action.zone_name)
                         _req = state_machine.current_order.required_counts or {}
-                        if _item in _req:
+                        # While the pre-gate owns cheese, on_action drops these
+                        # bin events and credits the region exit instead -- so
+                        # recording them here put a place in the journey that
+                        # nothing counted, and the evidence contradicted the
+                        # verdict: a ticket could show a cheese place and still
+                        # report that same cheese missing.  apply_cheese_takes
+                        # records the take that WAS counted.
+                        _owned = (state_machine.cheese_gate_owns_cheese
+                                  and _item in CHEESE_KEYS)
+                        if _item in _req and not _owned:
                             kdsocr.record_place(
                                 state_machine.current_ticket.ticket_id,
                                 _item, t=current_time, zone=action.zone_name,
@@ -2234,12 +2267,33 @@ def main():
         watchdog.stop()
         if dashboard_recorder is not None:
             try:
-                # SIGINT, never SIGKILL: the recorder has to close the
-                # GStreamer pipeline and tear down Firefox and the hidden
-                # display, and a killed recorder leaves an unplayable file and
-                # an orphaned Xorg.
-                dashboard_recorder.send_signal(signal.SIGINT)
-                dashboard_recorder.wait(timeout=60)
+                # Ask, never kill: the recorder has to close the GStreamer
+                # pipeline and tear down Firefox and the hidden display (or,
+                # on Windows, close the browser context, which is what
+                # finalises the video at all).  A killed recorder leaves an
+                # unplayable file and an orphaned Xorg.
+                #
+                # Windows is asked with a file, not a signal.  It has no SIGINT
+                # to send, and CTRL_BREAK_EVENT is delivered to every process
+                # in the recorder's group -- the Playwright driver included.
+                # Killing the driver means the browser context can never be
+                # closed, and closing it is the only thing that writes the
+                # video, so the polite signal destroyed exactly what it was
+                # trying to save.
+                if sys.platform == "win32":
+                    try:
+                        Path(_dash_record_path).with_suffix(".stop").touch()
+                    except OSError:
+                        logger.warning("could not ask the recorder to stop",
+                                       exc_info=True)
+                else:
+                    dashboard_recorder.send_signal(signal.SIGINT)
+                # Generous: the Windows recorder re-encodes the whole screencast
+                # on the way out, and that file is as long as the run in wall
+                # time -- minutes of 1080p, not seconds.  Timing out here kills
+                # the recorder mid-conversion and costs the recording, which is
+                # far worse than waiting.
+                dashboard_recorder.wait(timeout=900)
                 logger.info("Dashboard recording saved to %s", _dash_record_path)
             except subprocess.TimeoutExpired:
                 logger.warning("dashboard recorder did not finish in time; "
@@ -2269,14 +2323,30 @@ def main():
         # Trimming afterwards rather than recording per ticket: a recorder per
         # ticket would cost an Xorg and a Firefox launch each time, and would
         # miss the seconds either side of the order.
-        if (dashboard_recorder is not None
+        #
+        # Either recorder's file can be trimmed.  The dashboard capture is
+        # preferred where it exists, because it shows the verdict as the
+        # reviewer would have read it; the annotated feed is what a box
+        # without Xorg/Firefox/GStreamer can produce, and it carries the same
+        # boxes, masks and zones.  The clip script tells the two apart by the
+        # sidecar, so all that is decided here is which file to hand it.
+        _trim_target = ""
+        if dashboard_recorder is not None:
+            _trim_target = _dash_record_path
+        else:
+            try:
+                if recorder is not None:
+                    _trim_target = str(recorder.path)
+            except NameError:
+                pass  # the loop failed before the recorder was created
+        if (_trim_target
                 and str(_env("RECORD_WRONG_ONLY", True)).lower()
                 not in ("false", "0", "no")):
             try:
                 subprocess.run(
                     [sys.executable,
                      str(resource("scripts/clip_wrong_orders.py")),
-                     "--recording", _dash_record_path,
+                     "--recording", _trim_target,
                      "--journeys", str(config.get("ticket_journeys",
                                                   "output/ticket_journeys.jsonl"))],
                     check=False, timeout=900)

@@ -19,10 +19,13 @@ That means cuts land on keyframes: with the recorder's 2-second keyframe
 interval a clip can begin up to ~2 s early, which is padding in the right
 direction for reviewing what went wrong.
 
-The join between the journeys and the video is the WALL clock.  Journey steps
-are in the video's media time -- the pipeline runs slower than real time --
-so `opened_wall`/`verdict_wall` are what line up with a screen recording, and
-the recording's sidecar JSON says when it started.
+The join between the journeys and the video depends on which recorder made it.
+A dashboard recording is a screen capture in real time, so the WALL clock joins
+them: `opened_wall`/`verdict_wall`, against the start time in the recording's
+sidecar JSON.  An annotated-feed recording (RECORD_VIDEO) holds one frame per
+frame the pipeline processed, so it runs on the video's own MEDIA time and
+`opened_at`/`duration_s` join it directly, with no sidecar.  `--timebase` picks;
+the default reads the sidecar's presence and is right either way.
 """
 from __future__ import annotations
 
@@ -70,6 +73,9 @@ def main(argv=None) -> int:
                     help="keep the full recording as well as the clips")
     ap.add_argument("--pre-pad", type=float, default=PRE_PAD_S)
     ap.add_argument("--post-pad", type=float, default=POST_PAD_S)
+    ap.add_argument("--timebase", choices=("auto", "wall", "media"), default="auto",
+                    help="which clock the recording runs on; auto picks wall "
+                         "when a sidecar is present, media otherwise")
     args = ap.parse_args(argv)
 
     rec_dir = ROOT / "output" / "recordings"
@@ -85,15 +91,34 @@ def main(argv=None) -> int:
         log("recording not found: %s" % recording)
         return 1
 
+    # Which clock the recording runs on depends on which recorder made it.
+    #
+    # The dashboard recorder captures a browser window in real time, so the
+    # file follows the WALL clock and its sidecar says when it started: the
+    # journeys' `opened_wall`/`verdict_wall` are what line up with it.
+    #
+    # The annotated-feed recorder (RECORD_VIDEO) writes one frame per frame
+    # the pipeline processed, idle frames included, so its own time IS the
+    # production video's media time -- the clock the journey steps already
+    # use.  `opened_at` and `duration_s` place those cuts directly, and no
+    # sidecar is needed or written.  This is the path on a box that cannot
+    # run the Xorg/Firefox/GStreamer recorder at all.
     sidecar = recording.with_suffix(".json")
-    if not sidecar.exists():
-        log("no sidecar next to %s -- cannot place the clips on the wall clock"
-            % recording.name)
-        return 1
-    meta = json.loads(sidecar.read_text())
-    import datetime as _dt
-    rec_start = _dt.datetime.fromisoformat(meta["started"]).timestamp()
-    rec_len = float(meta.get("wall_s") or 0.0)
+    timebase = args.timebase
+    if timebase == "auto":
+        timebase = "wall" if sidecar.exists() else "media"
+    rec_start = 0.0
+    rec_len = 0.0
+    if timebase == "wall":
+        if not sidecar.exists():
+            log("no sidecar next to %s -- cannot place the clips on the wall clock"
+                % recording.name)
+            return 1
+        meta = json.loads(sidecar.read_text())
+        import datetime as _dt
+        rec_start = _dt.datetime.fromisoformat(meta["started"]).timestamp()
+        rec_len = float(meta.get("wall_s") or 0.0)
+    log("cutting %s on the %s clock" % (recording.name, timebase))
 
     journeys = load_journeys(Path(args.journeys))
     wrong = [j for j in journeys if j.get("correct") is False]
@@ -105,7 +130,7 @@ def main(argv=None) -> int:
         log("nothing went wrong, so there is nothing to keep")
         if not args.keep_full:
             recording.unlink()
-            sidecar.unlink()
+            sidecar.unlink(missing_ok=True)   # the media-time path writes none
             log("removed %s" % recording.name)
         return 0
 
@@ -114,14 +139,21 @@ def main(argv=None) -> int:
     made = 0
     for j in wrong:
         ref = str(j.get("ticket_id") or "unknown").replace("/", "-")
-        opened = j.get("opened_wall") or 0.0
-        ended = j.get("verdict_wall") or 0.0
-        if not opened or not ended:
-            log("%s has no wall-clock stamps (recorded before they were added);"
-                " skipping" % ref)
-            continue
-        start = max(0.0, opened - rec_start - args.pre_pad)
-        end = ended - rec_start + args.post_pad
+        if timebase == "wall":
+            opened = j.get("opened_wall") or 0.0
+            ended = j.get("verdict_wall") or 0.0
+            if not opened or not ended:
+                log("%s has no wall-clock stamps (recorded before they were added);"
+                    " skipping" % ref)
+                continue
+            start = max(0.0, opened - rec_start - args.pre_pad)
+            end = ended - rec_start + args.post_pad
+        else:
+            # Media time: the journey's own clock, so the window is the order
+            # itself with no recording offset to subtract.
+            opened = float(j.get("opened_at") or 0.0)
+            start = max(0.0, opened - args.pre_pad)
+            end = opened + float(j.get("duration_s") or 0.0) + args.post_pad
         if rec_len and start >= rec_len:
             log("%s happened after the recording stopped; skipping" % ref)
             continue
@@ -143,7 +175,7 @@ def main(argv=None) -> int:
 
     if made and not args.keep_full:
         recording.unlink()
-        sidecar.unlink()
+        sidecar.unlink(missing_ok=True)       # the media-time path writes none
         log("removed the full recording; kept %d wrong-order clip(s)" % made)
     elif not made:
         log("no clips were cut, so the full recording is kept")
