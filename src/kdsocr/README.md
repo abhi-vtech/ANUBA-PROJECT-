@@ -43,6 +43,27 @@ The child's own (verbose) log goes to `output/kdsocr/reader.log`; the stream we
 consume is `output/kdsocr/recipes.jsonl`. Both are rotated per run, so a stale
 file never replays as this run's tickets.
 
+**The KDS screen is not shown here.** kds-ocr emits the ticket as JSON and that
+is all this dashboard renders; the screen itself has its own dashboard in the
+kds-ocr repo (`scripts/live_status.py`).
+
+## Recording the dashboard
+
+`RECORD_DASHBOARD=<path>.mkv` records the dashboard **as a browser window**,
+through the existing `scripts/record_dashboard.py`: a hidden Xorg display,
+Firefox in kiosk mode on the page, captured with GStreamer `ximagesrc`
+straight into the Jetson's hardware H.264 encoder. The file is the browser
+window, not a second rendering of it that could drift from the page.
+
+It runs as a child process and is stopped with SIGINT, never SIGKILL: it has
+to close the GStreamer pipeline and tear down Firefox and the display, and a
+killed recorder leaves an unplayable file and an orphaned Xorg.
+
+Nothing composes video frames. An earlier attempt here drew a dashboard-alike
+with PIL -- it cost ~19 ms on the pinned main loop and was a second thing to
+keep in step with the page -- and `scripts/record_dashboard.py` already solved
+this properly, so the drawn version was removed.
+
 ## The four things this package guarantees
 
 ### 1. Quantities are counts, never weights

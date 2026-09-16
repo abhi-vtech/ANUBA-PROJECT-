@@ -78,6 +78,9 @@ kdsocr_live_seconds: 0
 # kds-ocr ingredient name -> our zone/class name.  Leave unset for the default.
 # kdsocr_ingredients: config/kdsocr_ingredients.yaml
 
+# RECORD_DASHBOARD=<path>.mkv records the dashboard as a real browser window
+# (scripts/record_dashboard.py: hidden Xorg + Firefox kiosk + hardware H.264).
+
 # Every ticket's full journey -- requirement changes, what was observed going
 # on, and the verdict -- appended as one JSON object per judged ticket.
 ticket_journeys: output/ticket_journeys.jsonl

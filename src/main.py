@@ -4,6 +4,8 @@ import logging
 import os
 import signal
 import socket
+import subprocess
+import sys
 import threading
 import shutil
 import time
@@ -574,43 +576,6 @@ from src.analysis.wrapping_state import STATE_CLOSING, STATE_DONE  # noqa: E402
 
 
 
-def _infer_hotdog_item(kds_video, hotdog_tracker, mono_id):
-    """Infer which menu item a finished hotdog track represents.
-
-    The detection model has a single ``hot-dog`` class -- there is no
-    per-variant class and no chili/cheese/onion classes -- so the physical type
-    can only be inferred from the ingredients the zone/``TemporalTracker``
-    pipeline attributed to this track.  We pick the configured shortcut whose
-    ingredient set best matches, and fall back to the bare detection class when
-    nothing matches, rather than guessing a variant.
-
-    Returning ``"hot-dog"`` still counts towards the order's quantity; it just
-    carries no type claim.  See ``TicketManager.validate``.
-    """
-    try:
-        record = hotdog_tracker._records.get(mono_id)
-        if record is None:
-            record = hotdog_tracker._retired_records.get(mono_id)
-        observed = {str(n).strip().lower() for n in (record.item_names if record else [])}
-    except Exception:
-        observed = set()
-    if not observed:
-        return "hot-dog"
-
-    mapper = kds_video.monitor.mapper
-    best_item, best_score = None, 0.0
-    for definition in mapper.shortcuts.values():
-        expected = {i.strip().lower() for i in definition.ingredients}
-        if not expected:
-            continue
-        # Jaccard: rewards matching the recipe without rewarding extra noise.
-        score = len(expected & observed) / float(len(expected | observed))
-        if score > best_score:
-            best_score, best_item = score, definition.item
-    # Require a real majority overlap before claiming a type at all.
-    return best_item if best_item and best_score >= 0.5 else "hot-dog"
-
-
 def _env(key, default=None, cast=None):
     val = os.environ.get(key)
     if val is None:
@@ -912,14 +877,6 @@ def main():
     _tickets_judged = []                      # one entry per verdict, for the log
     _ticket_limit_reached = threading.Event()  # set on the KDS reader thread
 
-    # kds_video_client is imported lazily: the KDS reader pulls in OCR
-    # dependencies that the production-only pipeline must not require.
-    kds_video = None
-    failure_recorder = None
-    compose_dashboard_frame = None
-    # Tickets created but whose clip has not started yet (it starts on the next
-    # frame, when there is a composed dashboard image to write).
-    _pending_recordings = set()
     # Tickets the KDS has judged, handed from the KDS reader thread to the main
     # loop.  The order state machine owns the checklist panels and must let go
     # of a ticket once the KDS has finished with it, or the dashboard keeps
@@ -927,15 +884,11 @@ def main():
     _kds_judged_tickets: list = []
     _kds_judged_lock = threading.Lock()
     # The KDS screen is read by the kds-ocr project running as a child
-    # process (see src/kdsocr/).  `kds_video` stays None: the old in-process
-    # reader is gone, and every branch guarded on it self-disables.
+    # process (see src/kdsocr/).
     kdsocr = None
     kds = None
-    kds_preview = None
     if kds_mode in ("kdsocr", "kds-ocr", "video"):
         from src.kdsocr import KdsOcrClient, ReaderConfig
-        from src.kdsocr.compose import compose_dashboard_frame
-        from src.kdsocr.compose import status_for as compose_status_for
 
         kds_source = os.getenv("KDS_SOURCE") or config.get("kds_source")
         if not kds_source:
@@ -999,25 +952,6 @@ def main():
         # A picture of the KDS screen for the dashboard panel.  kds-ocr reads
         # the feed in its own process, so without this the panel has ticket
         # state but no image.  Purely a view -- nothing is parsed from it.
-        kds_preview = None
-        if str(_env("KDS_PREVIEW", config.get("kds_preview", True))).lower() \
-                not in ("false", "0", "no"):
-            from src.kdsocr.preview import KdsPreview
-
-            _kds_start = video_start_from_filename(os.path.basename(str(kds_source)))
-            # The KDS media time that matches production media time 0.
-            _offset = 0.0
-            if _master_start is not None and _kds_start is not None:
-                _offset = (_master_start - _kds_start).total_seconds()
-            kds_preview = KdsPreview(
-                str(kds_source),
-                on_frame=dashboard.update_kds_frame,
-                fps=float(_env("KDS_PREVIEW_FPS", config.get("kds_preview_fps", 2.0))),
-                live=_is_rtsp,
-                start_at_s=0.0 if _is_rtsp else float(start_at_s or 0.0),
-                offset_s=_offset,
-            )
-            kds_preview.start()
         logger.info("kds-ocr reading the KDS screen from %s",
                     "<rtsp>" if _is_rtsp else kds_source)
     history_path = config.get("kds_history")
@@ -1108,27 +1042,39 @@ def main():
     recorder = recorder_from_env(fps, source)
 
     # Optional continuous recording of the DASHBOARD view (RECORD_DASHBOARD):
-    # the production feed and the annotated KDS screen side by side, exactly
-    # what the per-ticket clips show -- but unbroken for the whole run rather
-    # than one file per ticket.  Separate from RECORD_VIDEO, which records the
-    # production feed alone.
+    # RECORD_DASHBOARD records the DASHBOARD ITSELF, via
+    # scripts/record_dashboard.py: a hidden Xorg display, Firefox in kiosk mode
+    # on the page, captured with GStreamer straight into the Jetson's hardware
+    # H.264 encoder.  The file is the browser window, not a second rendering of
+    # it that could drift from what the page shows.  Separate from
+    # RECORD_VIDEO, which records the annotated production feed alone.
     dashboard_recorder = None
     _dash_record_path = _env("RECORD_DASHBOARD", "")
     if str(_dash_record_path).strip():
-        from src.video.video_recorder import VideoRecorder, default_recording_path
+        from src.video.video_recorder import default_recording_path
 
         if str(_dash_record_path).strip().lower() in ("1", "true", "yes", "on"):
             _dash_record_path = str(
                 default_recording_path("dashboard")
             ).replace(".mkv", "_dashboard.mkv")
-        dashboard_recorder = VideoRecorder(
-            _dash_record_path,
-            fps=float(_env("RECORD_FPS", 0, float) or fps or 30),
-            encoder=os.environ.get("RECORD_ENCODER", "nvenc"),
-            bitrate=int(os.environ.get("RECORD_BITRATE") or 4_000_000),
-            hud=False,   # the composed frame already carries its own status bar
-        )
-        logger.info("Recording the dashboard view to %s", _dash_record_path)
+        _dash_record_path = str(_dash_record_path)
+        _rec_cmd = [
+            sys.executable, str(resource("scripts/record_dashboard.py")),
+            "--url", "http://127.0.0.1:%d/" % int(os.environ.get("DASHBOARD_PORT", "8000")),
+            "--out", _dash_record_path,
+            "--size", "%dx%d" % (int(_env("RECORD_DASHBOARD_WIDTH", 1920, int)),
+                                 int(_env("RECORD_DASHBOARD_HEIGHT", 1080, int))),
+            # A safety net: if this process dies without running its shutdown,
+            # the recorder still stops rather than running on forever.
+            "--while-pid", str(os.getpid()),
+        ]
+        try:
+            dashboard_recorder = subprocess.Popen(_rec_cmd, start_new_session=True)
+            logger.info("Recording the dashboard window to %s (pid %d)",
+                        _dash_record_path, dashboard_recorder.pid)
+        except OSError:
+            logger.warning("could not start the dashboard recorder", exc_info=True)
+            dashboard_recorder = None
     frame_count = 0
     last_metrics_time = time.time()
     pipeline_start_time = time.time()
@@ -1218,8 +1164,7 @@ def main():
             # order the moment the last dog was wrapped -- before the toppings
             # finished going on, and before any late edit to the ticket -- and
             # would silently bypass the bump trigger entirely.
-            if (kds_video is None and kdsocr is None
-                    and state_machine.current_ticket is not None):
+            if kdsocr is None and state_machine.current_ticket is not None:
                 _need = getattr(state_machine.current_ticket, "total_hotdogs", 0) or 0
                 _made = len(_mock_made_ids)
                 if _need > 0 and _made >= _need:
@@ -1236,8 +1181,6 @@ def main():
                 # an hour of tickets arrives before the production feed reaches
                 # the food they describe. A live feed ignores this.
                 kdsocr.set_master_time(current_time)
-                if kds_preview is not None:
-                    kds_preview.set_master_time(current_time)
                 kdsocr.poll()
 
                 # A ticket edited on the KDS while the food is being made.
@@ -1352,9 +1295,6 @@ def main():
 
             # Keep the KDS reader in step with this video.  It reads far faster
             # than the detector runs, so without this it drifts minutes ahead.
-            if kds_video is not None:
-                kds_video.set_master_time(current_time)
-
             # Force finished status 3.5 seconds before the video ends
             if capture._is_file_source:
                 total_frames = capture.cap.get(cv2.CAP_PROP_FRAME_COUNT)
@@ -1376,8 +1316,8 @@ def main():
             # must already be running by the time the ticket activates.
             idle_now = (
                 idle_enabled
-                and kds_video is not None
-                and not kds_video.has_screen_content
+                and kdsocr is not None
+                and not kdsocr.has_screen_content
             )
             if idle_now != _idle_state:
                 _idle_state = idle_now
@@ -1443,8 +1383,8 @@ def main():
                     detections={},
                     hotdog_log=hotdog_tracker.get_hotdog_log(),
                 )
-                if kds_video is not None:
-                    dashboard.set_kds_state(kds_video.dashboard_state())
+                if kdsocr is not None:
+                    dashboard.set_kds_state(kdsocr.dashboard_state())
                 loop_ms = (time.perf_counter() - loop_start) * 1000.0
                 frame_count += 1
                 continue
@@ -1512,7 +1452,11 @@ def main():
                 for det in hand_detections:
                     zone = zones.get_zone_for_bbox(det.bbox, w, h)
                     if zone is not None and zone.zone_type == "bin":
-                        signal = flow_analyzer.compute_flow(
+                        # NOT `signal`: that name shadowed the `signal`
+                        # MODULE for the whole of main(), so signal.SIGINT
+                        # resolved to a FlowSignal and the dashboard recorder
+                        # could never be stopped cleanly.
+                        flow_signal = flow_analyzer.compute_flow(
                             prev_gray,
                             curr_gray,
                             det.bbox,
@@ -1520,7 +1464,7 @@ def main():
                             w,
                             h,
                         )
-                        flow_signals[det.track_id] = signal
+                        flow_signals[det.track_id] = flow_signal
                 prev_gray = curr_gray
             elif flow_analyzer is not None:
                 prev_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
@@ -2010,15 +1954,8 @@ def main():
                     # picked_counts["hot-dog"] is not -- that counts hotdogs
                     # seen, and two being visible satisfied a whole group
                     # fourteen seconds into the video.
-                    if kds_video is None and kdsocr is None and _mono is not None:
+                    if kdsocr is None and _mono is not None:
                         _mock_made_ids.add(_mono)
-                    if kds_video is not None and _mono is not None:
-                        kds_video.record_hotdog(
-                            item=_infer_hotdog_item(kds_video, hotdog_tracker, _mono),
-                            track_id=_mono,
-                            confidence=1.0,
-                            now=current_time,
-                        )
                     # Same evidence, recorded against the kds-ocr ticket: a
                     # finished hotdog is a step in its journey, so a WRONG
                     # verdict can show how many were actually made and when.
@@ -2040,19 +1977,28 @@ def main():
                     if rec.get("order_id") == t_id or (rec.get("active") and rec.get("order_id") is None)
                 ]
                 vision_count = len(active_tracks)
-                if vision_count > exp_count:
-                    last_alert_t = getattr(main, "_last_pos_alert_t", {}).get(t_id, 0.0)
-                    if (current_time - last_alert_t) >= 5.0:
-                        if not hasattr(main, "_last_pos_alert_t"):
-                            main._last_pos_alert_t = {}
-                        main._last_pos_alert_t[t_id] = current_time
-                        logger.warning(
-                            "[POS_FUSION_ALERT] Ticket %s expects %d hotdogs, but vision tracked %d active hotdogs!",
-                            t_id, exp_count, vision_count
-                        )
-                
+                # No over-count alert. `active_tracks` is inflated by track
+                # fragmentation -- one physical hotdog becomes several ids --
+                # so this fired on correct orders and meant nothing.
+
                 if state_machine.current_order:
-                    state_machine.current_order.picked_counts["hot-dog"] = vision_count
+                    # Arrival, not an exact count, and never allowed to fall.
+                    # The raw number is "hotdog tracks active right now", which
+                    # drops again as tracks end, so assigning it directly made
+                    # the checklist show 3/3 and then 1/3 on an order whose
+                    # hotdogs had all been made. Capped at what the ticket
+                    # asked for, so it settles there and stops.
+                    _req_hd = int(
+                        state_machine.current_order.required_counts.get(
+                            "hot-dog", exp_count) or exp_count
+                    )
+                    _seen_hd = int(
+                        state_machine.current_order.picked_counts.get("hot-dog", 0)
+                    )
+                    state_machine.current_order.picked_counts["hot-dog"] = (
+                        min(_req_hd, max(_seen_hd, vision_count)) if _req_hd
+                        else max(_seen_hd, vision_count)
+                    )
                     state_machine.calculate_validation(
                         state_machine.current_order, 
                         is_final=(state_machine.current_order.status.value == "completed")
@@ -2165,83 +2111,11 @@ def main():
                 wrapping_done_ids=_wrapping_done_mono,
             )
 
-            # Record the composed view -- kitchen camera + KDS screen + the
-            # ticket status -- as one unbroken video of the run, so it can be
-            # reviewed later without the dashboard running.
-            if dashboard_recorder is not None and kdsocr is not None:
-                _head, _detail = compose_status_for(
-                    state_machine.get_current_order(),
-                    state_machine.current_ticket.ticket_id
-                    if state_machine.current_ticket else None,
-                )
-                _dash_frame = compose_dashboard_frame(
-                    annotated,
-                    kds_preview.latest if kds_preview is not None else None,
-                    status=_head,
-                    lines=_detail,
-                )
-                if _dash_frame is not None:
-                    dashboard_recorder.write(_dash_frame)
-
             # KDS FIFO queue, completed/warning lists and the event timeline.
-            if kds_video is not None:
-                dashboard.set_kds_state(kds_video.dashboard_state())
-
-                # Record the dashboard view: per-ticket clips, and -- when
-                # RECORD_DASHBOARD is set -- one unbroken video of the whole run.
-                _clips_on = failure_recorder is not None and failure_recorder.enabled
-                if _clips_on or dashboard_recorder is not None:
-                    active = kds_video.manager.active_group
-                    # Compose while a card is merely *visible* too, so the
-                    # pre-roll covers the window between the card appearing and
-                    # the ticket being confirmed -- which is where the cheese
-                    # gets fetched.  Nothing is written to disk until a ticket
-                    # actually starts recording.  The continuous recording wants
-                    # EVERY frame, including the ones with a blank KDS, or the
-                    # run's video would silently skip its quiet stretches.
-                    if (
-                        dashboard_recorder is not None
-                        or active is not None
-                        or (_clips_on and failure_recorder.active)
-                        or kds_video.has_screen_content
-                    ):
-                        # Name every ticket being made, not just the head:
-                        # the clip is the evidence for the verdict, and with
-                        # two tickets on the board a banner showing one of
-                        # them misreports what the worker was doing.
-                        status = "no active ticket"
-                        _actives = kds_video.manager.active_groups
-                        if _actives:
-                            status = "   |   ".join(
-                                "TICKET %s  %d/%d hotdogs  %s" % (
-                                    g.ticket_id,
-                                    g.detected_total,
-                                    g.expected_total,
-                                    g.state.value,
-                                )
-                                for g in _actives
-                            )
-                        dash_frame = compose_dashboard_frame(
-                            annotated,
-                            kds_video.annotated_kds_frame,
-                            status=status,
-                        )
-                        if dash_frame is not None:
-                            if dashboard_recorder is not None:
-                                dashboard_recorder.write(dash_frame)
-                            if _clips_on:
-                                # A clip can only start once there is a frame to
-                                # size the writer from, so creation is deferred
-                                # to here rather than done in the event listener.
-                                for ticket_id in list(_pending_recordings):
-                                    failure_recorder.start(ticket_id, dash_frame)
-                                    _pending_recordings.discard(ticket_id)
-                                # After start(), so this frame arrives via
-                                # write() rather than twice -- once in the
-                                # pre-roll flush and once here.  It is buffered
-                                # for whatever ticket records next.
-                                failure_recorder.observe(dash_frame)
-                                failure_recorder.write(dash_frame)
+            # The old in-process KDS reader also composed a production+KDS
+            # frame here for per-ticket failure clips. It went with src/kds/,
+            # and the dashboard is now recorded as a real browser window
+            # (scripts/record_dashboard.py), so nothing composes frames.
 
             loop_ms = (time.perf_counter() - loop_start) * 1000.0
             frame_count += 1
@@ -2316,48 +2190,30 @@ def main():
         if state_machine.current_order and state_machine.current_order.status == OrderStatus.IN_PROGRESS:
             state_machine.finalize_current_order()
 
-        # Any ticket still on the KDS gets one last validation rather than
-        # being silently dropped.
-        if kds_video is not None:
-            try:
-                kds_video.finalize_all()
-                kds_video.stop()
-            except Exception:
-                logger.debug("KDS video shutdown failed", exc_info=True)
         watchdog.stop()
         if dashboard_recorder is not None:
             try:
-                dashboard_recorder.close()
-                logger.info(
-                    "Dashboard recording: %s (%d frames)",
-                    dashboard_recorder.path,
-                    dashboard_recorder.frames_written,
-                )
+                # SIGINT, never SIGKILL: the recorder has to close the
+                # GStreamer pipeline and tear down Firefox and the hidden
+                # display, and a killed recorder leaves an unplayable file and
+                # an orphaned Xorg.
+                dashboard_recorder.send_signal(signal.SIGINT)
+                dashboard_recorder.wait(timeout=60)
+                logger.info("Dashboard recording saved to %s", _dash_record_path)
+            except subprocess.TimeoutExpired:
+                logger.warning("dashboard recorder did not finish in time; "
+                               "the video may be incomplete")
+                dashboard_recorder.kill()
             except Exception:
-                logger.debug("dashboard recorder shutdown failed", exc_info=True)
-        if kds_preview is not None:
-            try:
-                kds_preview.stop()
-            except Exception:
-                logger.debug("KDS preview shutdown failed", exc_info=True)
+                # Visible, not debug: a recorder that fails to stop cleanly
+                # leaves an unplayable video, and silence made that
+                # indistinguishable from success.
+                logger.warning("dashboard recorder shutdown failed", exc_info=True)
         if kdsocr is not None:
             try:
                 kdsocr.stop()
             except Exception:
-                logger.debug("kds-ocr shutdown failed", exc_info=True)
-        if failure_recorder is not None:
-            try:
-                # An order still open at shutdown was never verified, so its
-                # clip is kept rather than thrown away.
-                failure_recorder.close()
-                logger.info(
-                    "Failure clips kept: %d, discarded (order correct): %d",
-                    failure_recorder.kept,
-                    failure_recorder.discarded,
-                )
-            except Exception:
-                logger.debug("failure recorder shutdown failed", exc_info=True)
-
+                logger.warning("kds-ocr shutdown failed", exc_info=True)
         state_machine.save_history()
         capture.release()
         

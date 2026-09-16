@@ -955,19 +955,10 @@
                     <div class="kds-tab" id="tab-progress">In Progress (0)</div>
                     <div class="kds-tab" id="tab-completed">Completed (0)</div>
                 </div>
-                <!-- Live KDS screen feed, annotated by src/kds/overlay.py.
-                     Falls back to the static per-ticket screenshot when the
-                     KDS video reader is not running (kds_mode != video). -->
-                <div id="kds-video-wrap" style="margin: 0 0 8px 0; display: none;">
-                    <!-- Capped height: the KDS screen is a reference view, and
-                         at full panel width it pushed the ticket queue below
-                         the fold.  The queue is what this panel is for. -->
-                    <img id="kds-video" src="" alt="Live KDS screen"
-                         style="width: 100%; max-height: 132px; object-fit: contain;
-                                background: #0b1220; border-radius: 6px;
-                                border: 1px solid #374151; display: block;">
-                    <div id="kds-video-status" style="font-size: 9px; color: #6b7280; text-align: right; padding-top: 3px;">live KDS feed</div>
-                </div>
+                <!-- No KDS screen here (2026-09-16): kds-ocr emits the ticket
+                     as JSON, which is all this dashboard needs, and the KDS
+                     screen has its own dashboard in the kds-ocr repo
+                     (scripts/live_status.py). This panel shows the tickets. -->
                 <!-- Shown while the KDS reader is starting, so the panel is
                      never simply blank: an empty panel reads as a broken feed. -->
                 <div id="kds-waiting" style="display: none; padding: 18px 12px; text-align: center;
@@ -1032,7 +1023,12 @@
             </div>
 
             <div class="kds-panel">
-            <div class="analytics-title">
+            <!-- Analytics hidden on 2026-09-16: the right sidebar shows the
+                 ticket's required items only. Hidden rather than deleted
+                 because renderUI() still writes to metric-total, donut-circle
+                 and the legend ids. The hiding is on these children, never on
+                 the .kds-panel wrapper -- that also holds the Checklist. -->
+            <div class="analytics-title" style="display: none;">
                 <span>Performance Analytics</span>
                 <select>
                     <option>Today</option>
@@ -1041,7 +1037,7 @@
             </div>
 
             <!-- Metric Grid -->
-            <div class="metric-grid" style="grid-template-columns: repeat(3, 1fr);">
+            <div class="metric-grid" style="display: none; grid-template-columns: repeat(3, 1fr);">
                 <div class="metric-card">
                     <span class="metric-label">Total Orders</span>
                     <span class="metric-value" id="metric-total">0</span>
@@ -1057,7 +1053,7 @@
             </div>
 
             <!-- Donut Chart -->
-            <div class="chart-panel">
+            <div class="chart-panel" style="display: none;">
                 <span class="chart-panel-title">Order Accuracy</span>
                 <div class="chart-row">
                     <div class="donut-container">
@@ -1089,7 +1085,7 @@
                 </div>
             </div>
 
-            <div class="footer-row" style="margin-top: 14px;">
+            <div class="footer-row" style="display: none; margin-top: 14px;">
                 <span>Last Updated: <span id="last-update-time">11:51:00 AM</span></span>
                 <span style="display:flex; align-items:center; gap:4px;">
                     <span class="live-dot" style="width:6px; height:6px; box-shadow:none;"></span>
@@ -1112,25 +1108,11 @@
                 </div>
             </div>
 
-            <!-- ════════════════════════════════════════════════════════
-                 TICKET JOURNEY PANEL
-                 A verdict alone is not actionable: "missing chilli" does not
-                 say whether the chilli was never applied, applied before the
-                 ticket was read, or whether the ticket itself changed while
-                 the food was being made.  This panel shows the ordered steps
-                 that produced each verdict, wrong ones first.
-            ════════════════════════════════════════════════════════ -->
-            <div class="hotdog-tracker-panel" style="display: flex; flex-direction: column;">
-                <div class="hotdog-tracker-header">
-                    <span class="hotdog-tracker-title" style="color: #f97316; font-size: 13px; font-weight: 700;">&#128220; Ticket journey</span>
-                    <span class="hotdog-count-badge" id="journey-badge" style="background: rgba(249, 115, 22, 0.2); color: #fb923c; font-weight: 700;">0 judged</span>
-                </div>
-                <div class="hotdog-log-scroll" id="journey-container">
-                    <div style="color: #6b7280; font-size: 11px; text-align: center; padding: 12px;">
-                        No ticket has been judged yet.
-                    </div>
-                </div>
-            </div>
+            <!-- The Ticket journey panel was removed from the page on
+                 2026-09-16: the right sidebar shows the ticket's required
+                 items only. The journey itself is NOT lost -- every judged
+                 ticket is still written to output/ticket_journeys.jsonl with
+                 its full step list. -->
             </div><!-- /.kds-panel -->
 
         </div>
@@ -1351,10 +1333,13 @@
             tabProgress.textContent = `In Progress (${orders.filter(o => o.status === 'in_progress').length})`;
             tabCompleted.textContent = `Completed (${orders.filter(o => o.status === 'completed').length})`;
 
-            // In live KDS mode renderKdsMedia() has already filled this list
-            // with one card per ticket on the screen.  This block renders a
-            // single "current order" and would overwrite that, so it is skipped.
-            const _kdsLive = !!latestData.kds_live;
+            // When a kds-ocr reader is running, renderKdsMedia() has already
+            // filled this list with one card per ticket on the board.  This
+            // block renders a single "current order" and would overwrite that,
+            // so it is skipped.  The signal used to be "is the KDS video
+            // stream live"; with the screen panel gone it is "is a reader
+            // supplying ticket state".
+            const _kdsLive = !!(latestData.kds && latestData.kds.counts);
 
             // Show ONLY the current active working order on dashboard
             const currentWorkingOrders = currentOrder ? [currentOrder] : [];
@@ -1592,7 +1577,6 @@
         // Shows the live annotated KDS screen when the KDS video reader is
         // running (kds_mode: video); otherwise falls back to the static
         // per-ticket screenshot that mock mode has always used.
-        let _kdsVideoStarted = false;
 
         // One card per ticket ON THE KDS RIGHT NOW, each with its own
         // requirement and its own progress.  Two tickets being built together
@@ -1777,61 +1761,27 @@
         }
 
         function renderKdsMedia(data) {
-            const vidWrap = document.getElementById('kds-video-wrap');
+            // No KDS screen image any more: kds-ocr emits the ticket as JSON,
+            // which is what this panel renders. So this only chooses between
+            // the ticket cards and the per-ticket screenshot mock mode uses.
             const imgWrap = document.getElementById('kds-image-wrap');
             const waiting = document.getElementById('kds-waiting');
             const list = document.getElementById('kds-queue-list');
             const tabs = document.querySelector('.kds-tabs');
-            if (!vidWrap || !imgWrap) return;
+            if (!imgWrap) return;
 
-            const kdsConfigured = !!(data.kds && data.kds.counts);
-
-            if (data.kds_live) {
-                if (waiting) waiting.style.display = 'none';
+            // `counts` is only present once a kds-ocr reader is running.
+            if (data.kds && data.kds.counts) {
                 imgWrap.style.display = 'none';
-                vidWrap.style.display = '';
-                // Several tickets can be on the screen and being made at once,
-                // so the panel lists each one with its own progress rather than
-                // collapsing the board into a single status line.
-                if (list) list.style.display = '';
                 if (tabs) tabs.style.display = 'none';
-                if (!_kdsVideoStarted) {
-                    // Assigned once: an MJPEG src must not be reset per frame.
-                    document.getElementById('kds-video').src = '/kds_video';
-                    _kdsVideoStarted = true;
-                }
-                const st = document.getElementById('kds-video-status');
-                const c = (data.kds && data.kds.counts) || {};
-                const groups = (data.kds && data.kds.queue) || [];
-                const actives = groups.filter(g => g.queue_label === 'ACTIVE');
-                if (st) {
-                    st.textContent = actives.length
-                        ? `live KDS feed — ${actives.length} ticket(s) in the kitchen, `
-                          + `${c.completed || 0} ok, ${c.wrong || 0} wrong`
-                        : `live KDS feed — ${c.queued || 0} queued, ${c.completed || 0} ok, ${c.wrong || 0} wrong`;
-                }
-                renderKdsTicketCards(list, groups, (data.kds && data.kds.warnings) || []);
-                return;
-            }
-
-            vidWrap.style.display = 'none';
-
-            // A reader IS configured but there is no picture of the screen.
-            // That is normal with kds-ocr: it reads the feed in its own
-            // process, and the preview is optional (KDS_PREVIEW=0, or a source
-            // cv2 could not open a second time).  The ticket state is the
-            // point of this panel, so show the queue and only fall back to
-            // "waiting" when there are no tickets yet either.
-            if (kdsConfigured) {
-                imgWrap.style.display = 'none';
-                const groups = (data.kds && data.kds.queue) || [];
+                const groups = data.kds.queue || [];
                 if (groups.length) {
                     if (waiting) waiting.style.display = 'none';
                     if (list) list.style.display = '';
-                    if (tabs) tabs.style.display = 'none';
-                    renderKdsTicketCards(list, groups,
-                                         (data.kds && data.kds.warnings) || []);
+                    renderKdsTicketCards(list, groups, data.kds.warnings || []);
                 } else {
+                    // Nothing on the board yet -- say so rather than leaving an
+                    // empty panel, which reads as a broken feed.
                     if (list) list.style.display = 'none';
                     if (waiting) waiting.style.display = '';
                 }
@@ -1858,7 +1808,6 @@
             const data = JSON.parse(event.data);
             latestData = data;
             try { renderKdsMedia(data); } catch (err) { console.error('KDS media render failed', err); }
-            try { renderTicketJourneys(data); } catch (err) { console.error('journey render failed', err); }
 
             const order = data.order || {};
             const pickedCounts = order.picked_counts || {};
@@ -2071,7 +2020,12 @@
             const win = document.getElementById('analysis-window');
             if (!win) return;
             const a = data.analysis || {}, sys = data.system || {}, hw = sys.hw || {};
-            const show = Object.keys(a).length > 0 && !data.kds_live;
+            // Analysis mode replaces the KDS panel and the checklist with its
+            // own columns (including its Events list), so it stays out of the
+            // way whenever a kds-ocr reader is running -- the ticket and its
+            // required items are what this dashboard is for.
+            const show = Object.keys(a).length > 0
+                         && !(data.kds && data.kds.counts);
             win.style.display = show ? 'flex' : 'none';
             document.querySelectorAll('.sidebar-left .kds-panel, .sidebar-left .events-panel').forEach(el => {
                 el.style.display = show ? 'none' : '';

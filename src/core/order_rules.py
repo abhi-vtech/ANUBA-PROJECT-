@@ -144,8 +144,15 @@ class OrderValidator:
             self.hotdog_ids.add(track_id)
 
     def set_hotdog_count(self, count: int) -> None:
-        """For runtimes that report a count rather than identities."""
-        self.hotdog_ids = set(range(max(0, int(count))))
+        """For runtimes that report a count rather than identities.
+
+        Monotonic: the reported number is "hotdogs visible now", which falls
+        again as tracks end.  Whether the dogs arrived does not become untrue
+        because the tracker lost them, so the high-water mark is kept.
+        """
+        n = max(0, int(count))
+        if n > len(self.hotdog_ids):
+            self.hotdog_ids = set(range(n))
 
     # -- judgement -------------------------------------------------------
 
@@ -169,9 +176,10 @@ class OrderValidator:
         check_hotdogs = observed_hd >= required_hd
         if not check_hotdogs:
             failures.append(Failure.MISSING_HOTDOG)
-        elif required_hd and observed_hd > required_hd:
-            # Not a failure on its own: tracker fragmentation inflates this.
-            failures.append(Failure.EXTRA_HOTDOG)
+        # Deliberately NOT reported: tracker fragmentation inflates the
+        # observed number (a verified 3-dog ticket measured 11 tracks), so an
+        # "extra hotdogs" finding says nothing about the order. Arrival is the
+        # whole of the hotdog check; the ingredients carry the verdict.
 
         # -- check 2: required items present ----------------------------
         missing: Dict[str, int] = {}

@@ -60,7 +60,6 @@ _latest_frame: Optional[bytes] = None
 # ~6.7 MB/s of duplicates at the browser, which is what made the dashboard sit
 # there loading.
 _frame_seq: int = 0
-_kds_frame_seq: int = 0
 _latest_ticket: Optional[Any] = None
 _latest_order: Optional[Any] = None
 _latest_stats: Optional[Any] = None
@@ -76,8 +75,6 @@ _last_frame_time: float = 0.0
 _exited_hotdogs: list = []
 # Latest KDS FIFO snapshot (empty unless kds_mode: video is active).
 _kds_state: dict = {}
-# Latest annotated KDS screen frame, JPEG-encoded, for the /kds_video stream.
-_latest_kds_frame: Optional[bytes] = None
 # Feed analysis (src/feed_analysis.py) and system / pipeline stats for the
 # dashboard's Analysis window.  Empty until the pipeline publishes them.
 _latest_analysis: dict = {}
@@ -148,28 +145,6 @@ def set_kds_state(state: dict) -> None:
 
 def get_kds_state() -> dict:
     return _kds_state
-
-
-def update_kds_frame(frame) -> None:
-    """Publish the latest annotated KDS screen frame for /kds_video.
-
-    Called from the KDS reader thread.  Encoding here (rather than in the
-    route) keeps the stream cheap when several browsers are watching.
-    """
-    global _latest_kds_frame, _kds_frame_seq
-    if frame is None:
-        return
-    try:
-        ok, buf = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
-        if ok:
-            _latest_kds_frame = buf.tobytes()
-            _kds_frame_seq += 1
-    except Exception:
-        pass
-
-
-def has_kds_frame() -> bool:
-    return _latest_kds_frame is not None
 
 
 def update_frame_data(
@@ -403,7 +378,6 @@ async def api_stats():
         "fps": _fps,
         "cart": get_cart_data(),
         "kds": _kds_state,
-        "kds_live": _latest_kds_frame is not None,
     }
 
 
@@ -495,35 +469,10 @@ async def video_feed():
 _MJPEG_BOUNDARY = b"--frame\r\nContent-Type: image/jpeg\r\n\r\n"
 
 
-async def kds_mjpeg_generator():
-    """Stream the annotated KDS screen, once per frame produced.
-
-    Sends a placeholder until the reader publishes its first frame, so the
-    panel shows *something* rather than an image that loads forever.
-    """
-    sent = -1
-    idle_since = time.time()
-    while True:
-        if _latest_kds_frame is None:
-            yield _MJPEG_BOUNDARY + _status_frame("Waiting for the KDS screen") + b"\r\n"
-            await asyncio.sleep(0.5)
-            continue
-        if _kds_frame_seq != sent:
-            sent = _kds_frame_seq
-            idle_since = time.time()
-            yield _MJPEG_BOUNDARY + _latest_kds_frame + b"\r\n"
-        elif time.time() - idle_since > _MJPEG_KEEPALIVE_S:
-            idle_since = time.time()
-            yield _MJPEG_BOUNDARY + _latest_kds_frame + b"\r\n"
-        await asyncio.sleep(0.05)
-
-
-@app.get("/kds_video")
-async def kds_video_feed():
-    """MJPEG stream of the live KDS screen, annotated with ticket state."""
-    return StreamingResponse(
-        kds_mjpeg_generator(), media_type="multipart/x-mixed-replace; boundary=frame"
-    )
+# The KDS screen is no longer shown here: kds-ocr emits the ticket as JSON,
+# which is what this dashboard renders, and the screen itself has its own
+# dashboard in the kds-ocr repo (scripts/live_status.py). The MJPEG stream and
+# its frame buffer went with it.
 
 
 @app.websocket("/ws")
@@ -550,8 +499,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     "wrapping_done_ids": _wrapping_done_ids,
                     "cart": get_cart_data(),
                     "kds": _kds_state,
-                    "kds_live": _latest_kds_frame is not None,
-                    "analysis": _latest_analysis,
+                                "analysis": _latest_analysis,
                     "system": _latest_system,
                 }
             )

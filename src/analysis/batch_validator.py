@@ -6,12 +6,22 @@ from src.domain.schemas import Ticket, LineItem
 from src.core.naming import normalize_item_name  # re-exported
 
 
+#: The dish itself, as opposed to an ingredient put on it.
+HOTDOG_KEY = "hot-dog"
+
+
 class BatchOrderValidator:
     def __init__(self, ticket: Ticket, strict_no_extras: bool = False):
         self.ticket = ticket
         self.strict_no_extras = strict_no_extras
         self.required_counts: Dict[str, int] = {}
         self.observed_counts: Dict[str, int] = {}
+        #: Latched once the ticket's hotdogs have been seen.  The live count is
+        #: "hotdog tracks active right now", which falls again as tracks end --
+        #: so an order that HAD its three hotdogs would report 1/3 a moment
+        #: later and the checklist would flicker.  Whether the dogs were made
+        #: does not become untrue because the tracker lost them.
+        self._hotdog_satisfied = False
         
         # Flatten order composition into required_counts
         if getattr(self.ticket, "hotdog_specs", None):
@@ -50,7 +60,17 @@ class BatchOrderValidator:
 
 
     def validate(self, is_final: bool = False) -> Dict:
-        """Validate the order and return the result."""
+        """Validate the order and return the result.
+
+        The hotdogs are judged on ARRIVAL, not on an exact count: once the
+        number the ticket asked for has been seen, that check is satisfied and
+        stays satisfied.  Counting them precisely is not something this
+        pipeline can do -- the tracker fragments one physical hotdog across
+        many ids, so the observed number is inflated and unstable -- and
+        holding an order against a number we cannot measure produced noise, not
+        accuracy.  The INGREDIENTS are still counted, because those are what a
+        crew member actually forgets.
+        """
         # Forgiveness logic for sauces and onions: if an application happened (observed > 0) 
         # but fell short of the required count, force it to match required.
         # We only apply this at the end of the video (is_final=True) so the UI increments realistically during the order.
@@ -62,19 +82,32 @@ class BatchOrderValidator:
                     if 0 < observed_qty < required_qty:
                         self.observed_counts[ingredient] = required_qty
 
+        observed = dict(self.observed_counts)
+
+        # Latch the hotdogs: reaching the required number once is enough.
+        required_hd = self.required_counts.get(HOTDOG_KEY, 0)
+        if required_hd:
+            if observed.get(HOTDOG_KEY, 0) >= required_hd:
+                self._hotdog_satisfied = True
+            if self._hotdog_satisfied:
+                observed[HOTDOG_KEY] = required_hd
+
         missing = {
-            ingredient: required_qty - self.observed_counts.get(ingredient, 0)
+            ingredient: required_qty - observed.get(ingredient, 0)
             for ingredient, required_qty in self.required_counts.items()
-            if self.observed_counts.get(ingredient, 0) < required_qty
+            if observed.get(ingredient, 0) < required_qty
         }
-        
+
         extra = {
-            ingredient: self.observed_counts.get(ingredient, 0) - required_qty
+            ingredient: observed.get(ingredient, 0) - required_qty
             for ingredient, required_qty in self.required_counts.items()
-            if self.observed_counts.get(ingredient, 0) > required_qty
+            # Never the hotdogs: the observed number is inflated by track
+            # fragmentation, so "extra hotdogs" would fire on correct orders.
+            if ingredient != HOTDOG_KEY and observed.get(ingredient, 0) > required_qty
         }
-        for ingredient, count in self.observed_counts.items():
-            if ingredient not in self.required_counts and count > 0:
+        for ingredient, count in observed.items():
+            if (ingredient not in self.required_counts
+                    and ingredient != HOTDOG_KEY and count > 0):
                 extra[ingredient] = count
 
         passed = not missing
