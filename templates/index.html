@@ -955,10 +955,21 @@
                     <div class="kds-tab" id="tab-progress">In Progress (0)</div>
                     <div class="kds-tab" id="tab-completed">Completed (0)</div>
                 </div>
-                <!-- No KDS screen here (2026-09-16): kds-ocr emits the ticket
-                     as JSON, which is all this dashboard needs, and the KDS
-                     screen has its own dashboard in the kds-ocr repo
-                     (scripts/live_status.py). This panel shows the tickets. -->
+                <!-- The live KDS screen.  kds-ocr reads the feed in its own
+                     process, so this is a second, low-rate read of the same
+                     source purely to show it (src/kdsocr/preview.py); on a
+                     recording it is held level with the production video so
+                     the screen matches the food on the main feed. -->
+                <div id="kds-video-wrap" style="margin: 0 0 8px 0; display: none;">
+                    <!-- Capped height: the screen is a reference view, and at
+                         full panel width it pushed the ticket queue below the
+                         fold.  The queue is what this panel is for. -->
+                    <img id="kds-video" src="" alt="Live KDS screen"
+                         style="width: 100%; max-height: 132px; object-fit: contain;
+                                background: #0b1220; border-radius: 6px;
+                                border: 1px solid #374151; display: block;">
+                    <div id="kds-video-status" style="font-size: 9px; color: #6b7280; text-align: right; padding-top: 3px;">live KDS feed</div>
+                </div>
                 <!-- Shown while the KDS reader is starting, so the panel is
                      never simply blank: an empty panel reads as a broken feed. -->
                 <div id="kds-waiting" style="display: none; padding: 18px 12px; text-align: center;
@@ -1094,7 +1105,14 @@
             <div class="hotdog-tracker-panel" style="display: flex; flex-direction: column;">
                 <div class="hotdog-tracker-header">
                     <span class="hotdog-tracker-title" style="color: #3b82f6; font-size: 13px; font-weight: 700;">📋 Ticket items</span>
-                    <span class="hotdog-count-badge" id="hotdog-count-badge" style="background: rgba(59, 130, 246, 0.2); color: #60a5fa; font-weight: 700;">0 / 0</span>
+                    <span style="display: flex; gap: 6px; align-items: center;">
+                        <!-- The verdict for the last order this panel showed,
+                             so the answer stays on screen after the ticket is
+                             bumped and the board has moved on. -->
+                        <span class="hotdog-count-badge" id="ticket-verdict-badge"
+                              style="display: none; font-weight: 700;"></span>
+                        <span class="hotdog-count-badge" id="hotdog-count-badge" style="background: rgba(59, 130, 246, 0.2); color: #60a5fa; font-weight: 700;">0 / 0</span>
+                    </span>
                 </div>
                 <div class="hotdog-log-scroll scrollable" id="added-items-container">
                     <ul id="added-items-list" style="list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px;"></ul>
@@ -1408,9 +1426,11 @@
                     && Object.keys(currentOrder.required_counts).length
                     ? currentOrder.required_counts
                     : null;
-                const names = Array.from(new Set(
-                    Object.keys(required || remaining).concat(Object.keys(picked))
-                ));
+                // ONLY what the ticket asks for.  Items picked that the
+                // ticket never mentioned used to be listed as "not on ticket";
+                // the question this panel answers is whether the REQUIRED
+                // items went on, and the extras crowded that out.
+                const names = Object.keys(required || remaining);
 
                 const rows = names.map(name => {
                     const got = picked[name] || 0;
@@ -1421,13 +1441,12 @@
                         name: name,
                         got: got,
                         need: need,
-                        extra: need <= 0,
                         done: need > 0 && got >= need,
                     };
                 });
                 // Outstanding first: what still has to be made is the part the
                 // person at the station actually needs to read.
-                const rank = r => r.extra ? 2 : (r.done ? 1 : 0);
+                const rank = r => r.done ? 1 : 0;
                 rows.sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
 
                 addedItemsList.innerHTML = '';
@@ -1437,12 +1456,7 @@
                 } else {
                     rows.forEach(r => {
                         let border, mark, markColour, qty;
-                        if (r.extra) {
-                            border = 'rgba(239, 68, 68, 0.45)';
-                            mark = '!';
-                            markColour = '#ef4444';
-                            qty = '×' + r.got + ' not on ticket';
-                        } else if (r.done) {
+                        if (r.done) {
                             border = 'rgba(16, 185, 129, 0.3)';
                             mark = '✓';
                             markColour = '#10b981';
@@ -1482,9 +1496,8 @@
                 // the rows changing together.
                 const _badge = document.getElementById('hotdog-count-badge');
                 if (_badge) {
-                    const needed = rows.filter(r => !r.extra);
-                    _badge.textContent = needed.filter(r => r.done).length
-                                         + ' / ' + needed.length;
+                    _badge.textContent = rows.filter(r => r.done).length
+                                         + ' / ' + rows.length;
                 }
                 const _title = document.querySelector('.hotdog-tracker-title');
                 if (_title) {
@@ -1500,6 +1513,26 @@
                 const _title = document.querySelector('.hotdog-tracker-title');
                 if (_title) _title.textContent = '\u{1F4CB} Ticket items';
             }
+
+            // Is this order done, and was it right?  Reads the judged queue,
+            // because the order state machine releases the ticket the moment
+            // it is bumped -- so by the time there is a verdict, currentOrder
+            // is already empty.
+            (function () {
+                const vb = document.getElementById('ticket-verdict-badge');
+                if (!vb) return;
+                const last = ((latestData && latestData.kds && latestData.kds.recent) || [])[0];
+                if (!last) { vb.style.display = 'none'; return; }
+                const wrong = last.correct === false;
+                const unjudged = last.correct === null;
+                const colour = unjudged ? '#9ca3af' : (wrong ? '#ef4444' : '#10b981');
+                vb.style.display = '';
+                vb.style.background = colour + '22';
+                vb.style.color = colour;
+                vb.style.border = '1px solid ' + colour + '55';
+                vb.textContent = last.ticket_id + ' '
+                    + (unjudged ? 'NOT VERIFIED' : (wrong ? '\u2717 WRONG' : '\u2713 DONE'));
+            })();
 
             // Calculate Performance Metrics from History (full history)
             const totalOrdersCount = history.length;
@@ -1715,7 +1748,7 @@
                 + ok.map(j => journeyCard(j, false)).join('');
         }
 
-        function renderKdsTicketCards(list, groups, warnings) {
+        function renderKdsTicketCards(list, groups, warnings, judged) {
             if (!list) return;
             if (!groups.length) {
                 list.innerHTML = '<div style="color:#6b7280;font-size:11px;padding:10px;'
@@ -1771,17 +1804,72 @@
                     + lines
                     + `</div>`;
             }).join('');
+
+            // Orders already judged, newest first, under the live ones -- so a
+            // new ticket pushes the previous one down the queue instead of
+            // replacing it, and the last verdicts stay readable.
+            const done = (judged || []).filter(j => j.correct !== undefined);
+            if (done.length) {
+                list.innerHTML += done.slice(0, 8).map(j => {
+                    const wrong = j.correct === false;
+                    const unjudged = j.correct === null;
+                    const colour = unjudged ? '#9ca3af' : (wrong ? '#ef4444' : '#10b981');
+                    const label = unjudged ? 'NOT VERIFIED' : (wrong ? 'WRONG' : 'CORRECT');
+                    const missing = Object.keys(j.missing || {})
+                        .filter(k => j.missing[k] > 0)
+                        .map(k => j.missing[k] + '\u00d7 ' + k);
+                    return `<div style="background:#0f1521;border:1px solid ${colour}33;`
+                        + `border-left:3px solid ${colour};border-radius:8px;`
+                        + `padding:7px 10px;margin-bottom:6px;opacity:0.85;">`
+                        + `<div style="display:flex;justify-content:space-between;align-items:center;">`
+                        + `<span style="font-weight:700;color:#9ca3af;font-size:11px;">`
+                        + `${escapeHtml(j.ticket_id || '?')}</span>`
+                        + `<span style="color:${colour};font-size:9px;font-weight:700;">`
+                        + `${label}</span></div>`
+                        + (missing.length
+                            ? `<div style="font-size:9px;color:#f87171;margin-top:2px;">`
+                              + `missing ${escapeHtml(missing.join(', '))}</div>`
+                            : '')
+                        + `</div>`;
+                }).join('');
+            }
         }
+
+        let _kdsVideoStarted = false;
 
         function renderKdsMedia(data) {
             // No KDS screen image any more: kds-ocr emits the ticket as JSON,
             // which is what this panel renders. So this only chooses between
             // the ticket cards and the per-ticket screenshot mock mode uses.
             const imgWrap = document.getElementById('kds-image-wrap');
+            const vidWrap = document.getElementById('kds-video-wrap');
             const waiting = document.getElementById('kds-waiting');
             const list = document.getElementById('kds-queue-list');
             const tabs = document.querySelector('.kds-tabs');
             if (!imgWrap) return;
+
+            // The screen itself, once the preview has published a frame. It is
+            // optional (KDS_PREVIEW=0, or a source cv2 cannot open twice), so
+            // the ticket list below never depends on it.
+            if (vidWrap) {
+                if (data.kds_live) {
+                    vidWrap.style.display = '';
+                    if (!_kdsVideoStarted) {
+                        // Assigned once: an MJPEG src must not be reset per frame.
+                        document.getElementById('kds-video').src = '/kds_video';
+                        _kdsVideoStarted = true;
+                    }
+                    const st = document.getElementById('kds-video-status');
+                    const c = (data.kds && data.kds.counts) || {};
+                    if (st) {
+                        st.textContent = 'live KDS feed \u2014 ' + (c.active || 0)
+                            + ' in the kitchen, ' + (c.completed || 0) + ' ok, '
+                            + (c.wrong || 0) + ' wrong';
+                    }
+                } else {
+                    vidWrap.style.display = 'none';
+                }
+            }
 
             // `counts` is only present once a kds-ocr reader is running.
             if (data.kds && data.kds.counts) {
@@ -1791,7 +1879,15 @@
                 if (groups.length) {
                     if (waiting) waiting.style.display = 'none';
                     if (list) list.style.display = '';
-                    renderKdsTicketCards(list, groups, data.kds.warnings || []);
+                    renderKdsTicketCards(list, groups, data.kds.warnings || [],
+                                         data.kds.recent || []);
+                } else if ((data.kds.recent || []).length) {
+                    // Board empty but orders have been judged: keep the queue
+                    // visible so the last ones stay readable.
+                    if (waiting) waiting.style.display = 'none';
+                    if (list) list.style.display = '';
+                    renderKdsTicketCards(list, [], data.kds.warnings || [],
+                                         data.kds.recent || []);
                 } else {
                     // Nothing on the board yet -- say so rather than leaving an
                     // empty panel, which reads as a broken feed.

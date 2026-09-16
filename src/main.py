@@ -897,6 +897,7 @@ def main():
     # process (see src/kdsocr/).
     kdsocr = None
     kds = None
+    kds_preview = None
     if kds_mode in ("kdsocr", "kds-ocr", "video"):
         from src.kdsocr import KdsOcrClient, ReaderConfig
 
@@ -961,7 +962,27 @@ def main():
 
         # A picture of the KDS screen for the dashboard panel.  kds-ocr reads
         # the feed in its own process, so without this the panel has ticket
-        # state but no image.  Purely a view -- nothing is parsed from it.
+        # state but no image.  Purely a VIEW -- nothing is parsed from it and
+        # no decision depends on it; the tickets come from the emissions.
+        if str(_env("KDS_PREVIEW", config.get("kds_preview", True))).lower() \
+                not in ("false", "0", "no"):
+            from src.kdsocr.preview import KdsPreview
+
+            _kds_start = video_start_from_filename(os.path.basename(str(kds_source)))
+            # The KDS media time matching production media time 0: the two
+            # recordings do not necessarily start at the same instant.
+            _offset = 0.0
+            if _master_start is not None and _kds_start is not None:
+                _offset = (_master_start - _kds_start).total_seconds()
+            kds_preview = KdsPreview(
+                str(kds_source),
+                on_frame=dashboard.update_kds_frame,
+                fps=float(_env("KDS_PREVIEW_FPS", config.get("kds_preview_fps", 3.0))),
+                live=_is_rtsp,
+                start_at_s=0.0 if _is_rtsp else float(start_at_s or 0.0),
+                offset_s=_offset,
+            )
+            kds_preview.start()
         logger.info("kds-ocr reading the KDS screen from %s",
                     "<rtsp>" if _is_rtsp else kds_source)
     history_path = config.get("kds_history")
@@ -1191,6 +1212,8 @@ def main():
                 # an hour of tickets arrives before the production feed reaches
                 # the food they describe. A live feed ignores this.
                 kdsocr.set_master_time(current_time)
+                if kds_preview is not None:
+                    kds_preview.set_master_time(current_time)
                 kdsocr.poll()
 
                 # A ticket edited on the KDS while the food is being made.
@@ -2227,6 +2250,11 @@ def main():
                 # leaves an unplayable video, and silence made that
                 # indistinguishable from success.
                 logger.warning("dashboard recorder shutdown failed", exc_info=True)
+        if kds_preview is not None:
+            try:
+                kds_preview.stop()
+            except Exception:
+                logger.warning("KDS preview shutdown failed", exc_info=True)
         if kdsocr is not None:
             try:
                 kdsocr.stop()

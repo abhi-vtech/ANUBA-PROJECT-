@@ -56,9 +56,12 @@ The child's own (verbose) log goes to `output/kdsocr/reader.log`; the stream we
 consume is `output/kdsocr/recipes.jsonl`. Both are rotated per run, so a stale
 file never replays as this run's tickets.
 
-**The KDS screen is not shown here.** kds-ocr emits the ticket as JSON and that
-is all this dashboard renders; the screen itself has its own dashboard in the
-kds-ocr repo (`scripts/live_status.py`).
+**The KDS screen** is shown in the KDS panel. kds-ocr reads the feed in its
+own process, so `preview.py` opens the same source a second time at a low
+frame rate purely to display it -- nothing is parsed from that copy, and the
+tickets come from the emissions either way. On a recording the preview is held
+level with the production video, so the screen matches the food on the main
+feed. `KDS_PREVIEW=0` turns it off; the ticket list never depends on it.
 
 ## Recording the dashboard
 
