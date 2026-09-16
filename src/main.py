@@ -390,7 +390,17 @@ def draw_annotations(frame, detections, zones, current_order):
     
     # (System ROI drawing removed per user request)───────────────────────────────────────────────────────────────────────
     
+    # Only the ROIs THIS ticket needs.  Drawing all twenty bins labelled every
+    # frame buried the two or three the crew actually has to touch, and a zone
+    # the ticket never mentions is one the pipeline already refuses to credit
+    # (see the required_counts gate in OrderStateMachine.on_action).  Non-bin
+    # zones -- assembly, the sauce vessel, the cheese region -- are always
+    # drawn: they are the workspace, not ingredients.
+    _required = set((getattr(current_order, "required_counts", None) or {}))
     for zone in zones.get_all():
+        if zone.zone_type == "bin" and _required:
+            if canonical_ingredient(zone.name) not in _required:
+                continue
         poly = [(int(p[0] * w), int(p[1] * h)) for p in zone.polygon]
         color = hex_to_bgr(zone.color)
         cv2.polylines(frame, [np.array(poly)], True, color, 2)
@@ -1817,11 +1827,19 @@ def main():
                 # did) rather than only that it was missing.
                 if kdsocr is not None and state_machine.current_ticket is not None:
                     if action.action_type in ("place", "sauce"):
-                        kdsocr.record_place(
-                            state_machine.current_ticket.ticket_id,
-                            canonical_ingredient(action.zone_name),
-                            t=current_time, zone=action.zone_name,
-                        )
+                        # Only the ROIs this ticket asks for.  The journey is
+                        # the evidence behind a verdict, and a bin the ticket
+                        # never mentioned is not evidence about this order --
+                        # the validator already refuses to credit it, so
+                        # recording it only padded the journey with items
+                        # nobody ordered.
+                        _item = canonical_ingredient(action.zone_name)
+                        _req = state_machine.current_order.required_counts or {}
+                        if _item in _req:
+                            kdsocr.record_place(
+                                state_machine.current_ticket.ticket_id,
+                                _item, t=current_time, zone=action.zone_name,
+                            )
 
                 if action.action_type == "pickup":
                     add_event(
@@ -2214,6 +2232,29 @@ def main():
                 kdsocr.stop()
             except Exception:
                 logger.warning("kds-ocr shutdown failed", exc_info=True)
+
+        # RECORD_WRONG_ONLY (default on): trim the run down to one clip per
+        # WRONG order and drop the rest.  Deliberately AFTER kdsocr.stop() --
+        # that is what closes and writes the last journeys, so running this
+        # before it could miss an order judged in the final seconds.
+        #
+        # Trimming afterwards rather than recording per ticket: a recorder per
+        # ticket would cost an Xorg and a Firefox launch each time, and would
+        # miss the seconds either side of the order.
+        if (dashboard_recorder is not None
+                and str(_env("RECORD_WRONG_ONLY", True)).lower()
+                not in ("false", "0", "no")):
+            try:
+                subprocess.run(
+                    [sys.executable,
+                     str(resource("scripts/clip_wrong_orders.py")),
+                     "--recording", _dash_record_path,
+                     "--journeys", str(config.get("ticket_journeys",
+                                                  "output/ticket_journeys.jsonl"))],
+                    check=False, timeout=900)
+            except Exception:
+                logger.warning("could not trim the recording to the wrong orders",
+                               exc_info=True)
         state_machine.save_history()
         capture.release()
         

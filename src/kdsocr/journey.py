@@ -59,6 +59,12 @@ class TicketJourney:
     not_checkable: List[str] = field(default_factory=list)
     #: How many times kds-ocr changed the requirement while it was open.
     revisions: int = 0
+    #: WALL-clock stamps, kept alongside the media-time ones.  The media
+    #: clock is what the steps and `duration_s` use, but a screen recording
+    #: runs on the wall clock -- the pipeline processes video slower than real
+    #: time -- so cutting this ticket out of that recording needs these.
+    opened_wall: float = 0.0
+    verdict_wall: Optional[float] = None
     #: The most recent timestamp seen, in whatever clock the caller is using.
     #: `duration_s` measures against this rather than against `time.time()`:
     #: the pipeline stamps steps with the video's MEDIA time, and mixing that
@@ -116,6 +122,9 @@ class TicketJourney:
             "ticket_id": self.ticket_id,
             "channel": self.channel,
             "opened_at": round(self.opened_at, 2),
+            "opened_wall": round(self.opened_wall, 3),
+            "verdict_wall": (round(self.verdict_wall, 3)
+                             if self.verdict_wall is not None else None),
             "duration_s": round(self.duration_s, 1),
             "revisions": self.revisions,
             "correct": self.correct,
@@ -159,7 +168,8 @@ class JourneyLog:
         if j is None:
             at = t if t is not None else self.now()
             j = TicketJourney(ticket_id=ticket_id, opened_at=at,
-                              channel=channel, last_t=at)
+                              channel=channel, last_t=at,
+                              opened_wall=time.time())
             self.open[ticket_id] = j
         return j
 
@@ -178,6 +188,7 @@ class JourneyLog:
         # counted as one.
         j.correct = None if correct is None else bool(correct)
         j.verdict_at = t if t is not None else self.now()
+        j.verdict_wall = time.time()
         j.message = message
         j.missing = dict(missing or {})
         j.extras = list(extras or [])

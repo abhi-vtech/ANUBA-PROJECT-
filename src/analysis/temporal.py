@@ -354,8 +354,6 @@ class TemporalTracker:
                     # hotdog.  Disabled by _REQUIRE_HOTDOG_RETURN.
                     if state.pending_picks and not _REQUIRE_HOTDOG_RETURN:
                         for pp_zone_id, pp in list(state.pending_picks.items()):
-                            if "onion" in pp.ingredient.lower():
-                                continue  # Wait for trajectory confirmation
                             elapsed = (now - pp.timestamp) * 1000
                             actions.append(Action(track_id=det.track_id, zone_id=pp.zone_id, zone_name=pp.ingredient, action_type="pick", timestamp=now, duration_ms=elapsed, from_zone=pp.zone_id))
                             actions.append(Action(track_id=det.track_id, zone_id=state.current_zone.id, zone_name=pp.ingredient, action_type="place", timestamp=now, duration_ms=0.0, from_zone=pp.zone_id))
@@ -380,8 +378,6 @@ class TemporalTracker:
                 # Legacy bin-exit shortcut; see _REQUIRE_HOTDOG_RETURN.
                 if state.pending_picks and not _REQUIRE_HOTDOG_RETURN:
                     for pp_zone_id, pp in list(state.pending_picks.items()):
-                        if "onion" in pp.ingredient.lower():
-                            continue  # Wait for trajectory confirmation
                         elapsed = (now - pp.timestamp) * 1000
                         actions.append(Action(track_id=det.track_id, zone_id=pp.zone_id, zone_name=pp.ingredient, action_type="pick", timestamp=now, duration_ms=elapsed, from_zone=pp.zone_id))
                         actions.append(Action(track_id=det.track_id, zone_id=state.current_zone.id, zone_name=pp.ingredient, action_type="place", timestamp=now, duration_ms=0.0, from_zone=pp.zone_id))
@@ -405,8 +401,6 @@ class TemporalTracker:
                         list(state.pending_picks.keys()),
                     )
                     for pp_zone_id, pp in list(state.pending_picks.items()):
-                        if "onion" in pp.ingredient.lower():
-                            continue  # Wait for trajectory confirmation (hotdog proximity)
                         elapsed = (now - pp.timestamp) * 1000
                         actions.append(
                             Action(
@@ -452,13 +446,17 @@ class TemporalTracker:
                 if zone.zone_type == "bin" and zone.id not in state.pending_picks:
                     # TRAJECTORY MODE: Register pending pick after _MIN_BIN_FRAMES frames.
                     # Confirmation only fires when hand reaches hotdog proximity.
-                    # Onions get a higher frame threshold to prevent small hovers from registering,
-                    # and MUST have visual flow contact (to prove hand grabbed it, not just hovered).
+                    # Onions were the STRICTEST ingredient here -- 3 frames
+                    # against a default of 2 -- and were additionally the only
+                    # one excluded from the bin-exit commit below, so they had
+                    # to reach hotdog proximity to count at all.  Between the
+                    # two, onions that really did go on were not registering.
+                    # They are now as sensitive as the most sensitive
+                    # ingredient (cheese) and commit like every other one.
                     min_frames = _MIN_BIN_FRAMES
                     requires_contact = False
                     if "onion" in zone.name.lower():
-                        min_frames = 3  # Reduced dwell time for the down side
-                        requires_contact = False
+                        min_frames = 2
                     elif "relish" in zone.name.lower():
                         min_frames = 10  # ~500ms at 20fps
                     elif "cheese" in zone.name.lower():
@@ -529,8 +527,6 @@ class TemporalTracker:
                         list(state.pending_picks.keys()),
                     )
                     for pp_zone_id, pp in list(state.pending_picks.items()):
-                        if "onion" in pp.ingredient.lower():
-                            continue  # Wait for trajectory confirmation (hotdog proximity)
                         elapsed = (now - pp.timestamp) * 1000
                         actions.append(
                             Action(

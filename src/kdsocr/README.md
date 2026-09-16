@@ -27,6 +27,19 @@ import path, and a crash in the reader cannot take the detection loop down.
 
 ## Running
 
+```bash
+./run_kds.sh            # the video pair named at the top of that file
+./run_kds.sh --live     # the RTSP cameras (needs KDS_RTSP, KITCHEN_RTSP)
+./run_kds.sh --full     # the whole recording rather than the first RUN_FOR_S
+```
+
+`run_kds.sh` holds both sources -- the KDS screen and the kitchen camera for
+the same hour -- so changing which pair is processed is two lines at the top
+of it. It prints the dashboard URL, refuses to start if the port is still held
+by a previous run, and records the dashboard trimmed to the WRONG orders.
+
+Or set it up by hand:
+
 ```yaml
 # config/model.yaml
 kds_mode: kdsocr
@@ -48,6 +61,17 @@ is all this dashboard renders; the screen itself has its own dashboard in the
 kds-ocr repo (`scripts/live_status.py`).
 
 ## Recording the dashboard
+
+`RECORD_WRONG_ONLY=1` (the default) trims the run afterwards to one clip per
+order judged **WRONG**, in `output/wrong_orders/`, and deletes the full
+recording. Correct orders are not kept, and neither are orders that were never
+judged -- voided, or still open at the end -- because there is no verdict to
+review. The cut is a stream copy, so it re-encodes nothing and lands on
+keyframes (up to ~2 s of extra lead-in, which is padding in the useful
+direction). `RECORD_WRONG_ONLY=0` keeps the unbroken recording instead.
+
+Recording per ticket rather than trimming afterwards would cost an Xorg and a
+Firefox launch per order, and would miss the seconds either side of it.
 
 `RECORD_DASHBOARD=<path>.mkv` records the dashboard **as a browser window**,
 through the existing `scripts/record_dashboard.py`: a hidden Xorg display,

@@ -981,15 +981,9 @@
 
 
 
-            <!-- The left "Ticket checklist" list was removed: it duplicated the
-                 Checklist panel on the right, which now shows the same items as
-                 progress bars.  The list element is kept hidden so the render
-                 code that still writes to it has somewhere to write. -->
-            <div class="sidebar-panel events-panel" style="display: none;">
-                <div class="scrollable" id="added-items-container">
-                    <ul id="added-items-list"></ul>
-                </div>
-            </div>
+            <!-- The ticket's items live in the RIGHT sidebar now (2026-09-16).
+                 The left column is the board: which tickets are up and what
+                 each one ordered. -->
         </div>
 
         <!-- Center Column -->
@@ -1023,12 +1017,7 @@
             </div>
 
             <div class="kds-panel">
-            <!-- Analytics hidden on 2026-09-16: the right sidebar shows the
-                 ticket's required items only. Hidden rather than deleted
-                 because renderUI() still writes to metric-total, donut-circle
-                 and the legend ids. The hiding is on these children, never on
-                 the .kds-panel wrapper -- that also holds the Checklist. -->
-            <div class="analytics-title" style="display: none;">
+            <div class="analytics-title">
                 <span>Performance Analytics</span>
                 <select>
                     <option>Today</option>
@@ -1037,7 +1026,7 @@
             </div>
 
             <!-- Metric Grid -->
-            <div class="metric-grid" style="display: none; grid-template-columns: repeat(3, 1fr);">
+            <div class="metric-grid" style="grid-template-columns: repeat(3, 1fr);">
                 <div class="metric-card">
                     <span class="metric-label">Total Orders</span>
                     <span class="metric-value" id="metric-total">0</span>
@@ -1053,7 +1042,7 @@
             </div>
 
             <!-- Donut Chart -->
-            <div class="chart-panel" style="display: none;">
+            <div class="chart-panel">
                 <span class="chart-panel-title">Order Accuracy</span>
                 <div class="chart-row">
                     <div class="donut-container">
@@ -1085,7 +1074,7 @@
                 </div>
             </div>
 
-            <div class="footer-row" style="display: none; margin-top: 14px;">
+            <div class="footer-row" style="margin-top: 14px;">
                 <span>Last Updated: <span id="last-update-time">11:51:00 AM</span></span>
                 <span style="display:flex; align-items:center; gap:4px;">
                     <span class="live-dot" style="width:6px; height:6px; box-shadow:none;"></span>
@@ -1094,17 +1083,21 @@
             </div>
 
             <!-- ════════════════════════════════════════════════════════
-                 REQUIRED ITEMS CHECKLIST PANEL
+                 TICKET ITEMS
+                 Moved here from the left column on 2026-09-16.  The old
+                 "Checklist" panel that lived here rebuilt the item list from
+                 the ticket's MODIFIER rows, which are empty on most tickets --
+                 so it only ever showed HOT-DOG.  This reads the order's
+                 required_counts, which is the requirement kds-ocr actually
+                 emitted, so it lists every item and follows a ticket edit.
             ════════════════════════════════════════════════════════ -->
             <div class="hotdog-tracker-panel" style="display: flex; flex-direction: column;">
                 <div class="hotdog-tracker-header">
-                    <span class="hotdog-tracker-title" style="color: #3b82f6; font-size: 13px; font-weight: 700;">📋 Checklist</span>
+                    <span class="hotdog-tracker-title" style="color: #3b82f6; font-size: 13px; font-weight: 700;">📋 Ticket items</span>
                     <span class="hotdog-count-badge" id="hotdog-count-badge" style="background: rgba(59, 130, 246, 0.2); color: #60a5fa; font-weight: 700;">0 / 0</span>
                 </div>
-                <div class="hotdog-log-scroll" id="hotdog-log-container">
-                    <div style="color: #6b7280; font-size: 11px; text-align: center; padding: 12px;">
-                        Waiting for active KDS order...
-                    </div>
+                <div class="hotdog-log-scroll scrollable" id="added-items-container">
+                    <ul id="added-items-list" style="list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px;"></ul>
                 </div>
             </div>
 
@@ -1483,9 +1476,29 @@
                         addedItemsList.appendChild(li);
                     });
                 }
+
+                // The panel header: satisfied / required for THIS ticket, and
+                // which ticket it is, so an edit is visible as the numbers and
+                // the rows changing together.
+                const _badge = document.getElementById('hotdog-count-badge');
+                if (_badge) {
+                    const needed = rows.filter(r => !r.extra);
+                    _badge.textContent = needed.filter(r => r.done).length
+                                         + ' / ' + needed.length;
+                }
+                const _title = document.querySelector('.hotdog-tracker-title');
+                if (_title) {
+                    _title.textContent = currentOrder.ticket_id
+                        ? '\u{1F4CB} Ticket items \u2014 ' + currentOrder.ticket_id
+                        : '\u{1F4CB} Ticket items';
+                }
             } else {
                 addedItemsList.innerHTML =
                     '<li style="' + muted + '">Waiting for KDS ticket...</li>';
+                const _badge = document.getElementById('hotdog-count-badge');
+                if (_badge) _badge.textContent = '0 / 0';
+                const _title = document.querySelector('.hotdog-tracker-title');
+                if (_title) _title.textContent = '\u{1F4CB} Ticket items';
             }
 
             // Calculate Performance Metrics from History (full history)
@@ -1884,6 +1897,10 @@
             btn.textContent = _hotdogJsonVisible ? 'Hide' : 'Show';
         }
 
+        // Superseded by the "Ticket items" list (renderUI writes
+        // #added-items-list), which reads required_counts instead of
+        // rebuilding the items from modifier rows. Kept as a no-op so the
+        // existing call sites do not have to be unpicked.
         function renderRequiredItemsChecklist(ord, tkt) {
             const container = document.getElementById('hotdog-log-container');
             const badge     = document.getElementById('hotdog-count-badge');
