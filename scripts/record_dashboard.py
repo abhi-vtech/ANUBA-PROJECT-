@@ -10,7 +10,13 @@ The Jetson is used over SSH with no screen, so this:
    `xrdpdev` driver, since the setuid Xorg wrapper only allows console users;
 2. opens Firefox in kiosk mode on the dashboard;
 3. captures the display with GStreamer `ximagesrc` straight into the Jetson's
-   hardware H.264 encoder (nvv4l2h264enc), writing an MKV.
+   hardware H.264 encoder (nvv4l2h264enc), writing a fragmented MP4.
+
+The muxer is `mp4mux fragment-duration=1000`, not plain `mp4mux`.  A plain MP4
+only becomes playable when its moov atom is written at EOS, so an unclean exit
+would leave nothing readable -- the property the MKV muxer used to provide for
+free.  Fragmenting flushes a self-contained chunk every second, so a truncated
+file still plays up to the last whole fragment.
 
 The capture follows the wall clock.  When the pipeline runs slower than real
 time the recording is longer than the camera footage; a camera-speed copy can
@@ -145,7 +151,8 @@ class ScreenRecorder:
         self.pipeline = Gst.parse_launch(
             f"ximagesrc display-name={display} use-damage=false show-pointer=false ! "
             f"video/x-raw,framerate={fps}/1 ! nvvidconv ! video/x-raw(memory:NVMM),format=NV12 ! "
-            f"nvv4l2h264enc bitrate={bitrate} iframeinterval={fps * 2} ! h264parse ! matroskamux ! "
+            f"nvv4l2h264enc bitrate={bitrate} iframeinterval={fps * 2} ! h264parse ! "
+            f"mp4mux fragment-duration=1000 ! "
             f'filesink location="{location}"'
         )
         self.bus = self.pipeline.get_bus()
@@ -162,7 +169,7 @@ class ScreenRecorder:
         return f"{err.message} ({debug})"
 
     def stop(self) -> None:
-        # EOS lets matroskamux write its index, so the file is complete.
+        # EOS lets mp4mux write its final fragment and index, so the file is complete.
         self.pipeline.send_event(Gst.Event.new_eos())
         self.bus.timed_pop_filtered(30 * Gst.SECOND, Gst.MessageType.EOS | Gst.MessageType.ERROR)
         self.pipeline.set_state(Gst.State.NULL)
@@ -199,7 +206,7 @@ def stop_process_group(proc, pattern: str = None) -> None:
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--url", default="http://127.0.0.1:8000/")
-    ap.add_argument("--out", help="output .mkv (default: output/recordings/dashboard_<time>.mkv)")
+    ap.add_argument("--out", help="output .mp4 (default: output/recordings/dashboard_<time>.mp4)")
     ap.add_argument("--display", default=":99")
     ap.add_argument("--size", default="1920x1080")
     ap.add_argument("--fps", type=int, default=15)
@@ -212,7 +219,7 @@ def main(argv=None) -> int:
     args = ap.parse_args(argv)
 
     width, height = (int(v) for v in args.size.lower().split("x"))
-    out = Path(args.out) if args.out else ROOT / "output" / "recordings" / f"dashboard_{time.strftime('%Y%m%d_%H%M%S')}.mkv"
+    out = Path(args.out) if args.out else ROOT / "output" / "recordings" / f"dashboard_{time.strftime('%Y%m%d_%H%M%S')}.mp4"
     out.parent.mkdir(parents=True, exist_ok=True)
     log_dir = ROOT / "bench" / "logs"  # Xorg and Firefox logs, kept out of output/
     log_dir.mkdir(parents=True, exist_ok=True)

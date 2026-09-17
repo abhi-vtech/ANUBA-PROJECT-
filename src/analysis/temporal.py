@@ -22,6 +22,14 @@ _REQUIRE_HOTDOG_RETURN: bool = False
 # before a pending pick is registered. At ~20fps, 2 frames = ~100ms.
 _MIN_BIN_FRAMES: int = 2
 
+# Relish demands much more evidence than anything else (~500 ms at 20 fps).
+# Named because onions borrow it: see the onion branch in update(), where a
+# ticket that asks for relish raises the bar for onions to this same number.
+_RELISH_MIN_FRAMES: int = 10
+
+# The sensitive setting, used by wells that have nothing to be confused with.
+_SENSITIVE_MIN_FRAMES: int = 2
+
 # Pending pick TTL — how long (seconds) a pick survives without reaching hotdog.
 # Granular ingredients get extra time (burst pinches over longer interval);
 # discrete items expire faster to reduce false positives.
@@ -456,11 +464,28 @@ class TemporalTracker:
                     min_frames = _MIN_BIN_FRAMES
                     requires_contact = False
                     if "onion" in zone.name.lower():
-                        min_frames = 2
+                        # Onions are the well most easily confused with relish:
+                        # a hand dipping for one reads much like a hand dipping
+                        # for the other.  Which risk matters depends entirely on
+                        # the ticket.
+                        #
+                        # No relish on the ticket -> nothing to confuse onions
+                        # with, so stay at the most sensitive setting.  The
+                        # failure that actually happened here was onions going
+                        # on and never registering.
+                        #
+                        # Relish on the ticket -> a relish dip credited as
+                        # onions is now a real possibility, so onions take
+                        # relish's own evidence bar.  `requires_relish` is
+                        # computed by the caller from the active ticket's
+                        # required_counts; it was passed in but never read until
+                        # now.
+                        min_frames = (_RELISH_MIN_FRAMES if requires_relish
+                                      else _SENSITIVE_MIN_FRAMES)
                     elif "relish" in zone.name.lower():
-                        min_frames = 10  # ~500ms at 20fps
+                        min_frames = _RELISH_MIN_FRAMES  # ~500ms at 20fps
                     elif "cheese" in zone.name.lower():
-                        min_frames = 2  # Very sensitive
+                        min_frames = _SENSITIVE_MIN_FRAMES  # Very sensitive
                     elif "chilli" in zone.name.lower():
                         min_frames = 6  # Reduced threshold to catch fast second hovers
 

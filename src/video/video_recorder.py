@@ -12,8 +12,9 @@ Encoding uses the Jetson's hardware H.264 encoder (nvv4l2h264enc) when
 GStreamer and the NVIDIA plugins are available, so the file is H.264 straight
 away with no conversion afterwards.  Otherwise it falls back to OpenCV's mp4v.
 
-    RECORD_VIDEO=1             auto-name in output/recordings/<source>_<time>.mkv
-    RECORD_VIDEO=out/run.mkv   or an explicit path (.mkv survives an unclean exit)
+    RECORD_VIDEO=1             auto-name in output/recordings/<source>_<time>.mp4
+    RECORD_VIDEO=out/run.mp4   or an explicit path (fragmented MP4, so a
+                               truncated file still plays to the last fragment)
     RECORD_FPS=30              playback rate (default: pipeline fps, else 30)
     RECORD_ENCODER=nvenc       nvenc (hardware H.264) or opencv
     RECORD_BITRATE=4000000     hardware encoder bitrate, bits per second
@@ -45,7 +46,7 @@ try:
 
     Gst.init(None)
     _NVENC_OK = all(
-        Gst.ElementFactory.find(e) for e in ("appsrc", "nvvidconv", "nvv4l2h264enc", "h264parse", "matroskamux")
+        Gst.ElementFactory.find(e) for e in ("appsrc", "nvvidconv", "nvv4l2h264enc", "h264parse", "mp4mux")
     )
 except Exception:  # gi not importable, or no NVIDIA GStreamer plugins
     Gst = None
@@ -57,7 +58,7 @@ def hardware_encoder_available() -> bool:
 
 
 def default_recording_path(source=None):
-    """output/recordings/<source name>_<YYYYmmdd_HHMMSS>.mkv"""
+    """output/recordings/<source name>_<YYYYmmdd_HHMMSS>.mp4"""
     s = str(source) if source is not None else ""
     if s.isdigit():
         stem = f"camera{s}"
@@ -67,11 +68,11 @@ def default_recording_path(source=None):
         stem = Path(s).stem
     else:
         stem = "recording"
-    return RECORDINGS_DIR / f"{stem}_{time.strftime('%Y%m%d_%H%M%S')}.mkv"
+    return RECORDINGS_DIR / f"{stem}_{time.strftime('%Y%m%d_%H%M%S')}.mp4"
 
 
 class HardwareH264Writer:
-    """BGR frames -> appsrc -> nvvidconv -> nvv4l2h264enc -> h264parse -> MKV."""
+    """BGR frames -> appsrc -> nvvidconv -> nvv4l2h264enc -> h264parse -> fragmented MP4."""
 
     def __init__(self, path, size, fps, bitrate=4_000_000):
         if not _NVENC_OK:
@@ -85,7 +86,7 @@ class HardwareH264Writer:
             "appsrc name=src is-live=false block=true format=time ! "
             "nvvidconv ! video/x-raw(memory:NVMM),format=NV12 ! "
             f"nvv4l2h264enc bitrate={int(bitrate)} iframeinterval={rate * 2} ! h264parse ! "
-            f'matroskamux ! filesink location="{location}"'
+            f'mp4mux fragment-duration=1000 ! filesink location="{location}"'
         )
         self._src = self._pipeline.get_by_name("src")
         self._src.set_property(
@@ -115,7 +116,7 @@ class HardwareH264Writer:
 
     def release(self):
         self._src.emit("end-of-stream")
-        # Wait for EOS so matroskamux writes its index and the file is complete.
+        # Wait for EOS so mp4mux writes its final fragment and the file is complete.
         self._bus.timed_pop_filtered(20 * Gst.SECOND, Gst.MessageType.EOS | Gst.MessageType.ERROR)
         self._pipeline.set_state(Gst.State.NULL)
 

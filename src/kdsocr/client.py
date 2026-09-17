@@ -210,6 +210,29 @@ class KdsOcrClient:
                 self._close_unjudged(ref, "no hot dogs on this ticket")
             return
 
+        if ref not in self._queued and self._duplicate_misread(ref, em):
+            # Not an order. A reference that is one inserted character away
+            # from a ticket already on the board AND carries that ticket's
+            # exact contents is that ticket, read wrong.
+            #
+            # Observed 2026-09-16: CHK-2651 and CHK-261 emitted at the same
+            # screen_at with identical items, were both queued, both judged and
+            # both failed -- one physical order producing two wrong verdicts.
+            #
+            # Identity is keyed on the reference's trailing digits, which
+            # survives a digit being MISREAD but not one being INSERTED:
+            # tail("2651") != tail("261"). Both tests are required here,
+            # because two customers really can order the same thing at the same
+            # time -- finalize() already refuses to merge CHK-486/487 for that
+            # reason -- and equally a real ticket can sit one digit away from
+            # another. Only the two together mean a misread.
+            logger.warning(
+                "kds-ocr ref %s ignored: same contents as %s already on the "
+                "board and one character longer -- treating as a misread of it",
+                ref, self._duplicate_misread(ref, em),
+            )
+            return
+
         if ref not in self._queued:
             # First read we could actually build from. A ticket that appeared
             # `blocked` or with no hot dogs and only became readable later
@@ -319,6 +342,23 @@ class KdsOcrClient:
                 out.append(em.to_ticket())
         return out
 
+    def requeue_update(self, ref: str) -> None:
+        """Put back an update the pipeline could not apply yet.
+
+        `take_updates` drains, so an update handed over while the state machine
+        is still on the previous ticket -- or has not opened this one yet, since
+        the loop takes updates BEFORE it calls get_next_ticket -- used to be
+        dropped permanently.  The order then kept whatever requirement its first
+        emission carried, and a first emission rests on a single OCR read.
+
+        Seen 2026-09-17 on CHK-251: `appeared` at n_reads=1 said 1 ORG PLAN,
+        `bumped` at n_reads=134 said 2 ORG PLAN.  The correction was queued,
+        taken, refused because the ticket was not open yet, and lost -- so the
+        ticket was judged against the one-read number for the rest of its life.
+        """
+        if ref not in self._pending_updates and ref not in self._judged:
+            self._pending_updates.append(ref)
+
     def take_cancellations(self) -> List[str]:
         """Tickets being built that must be dropped without a verdict. Drains."""
         out = [r for r in self._pending_cancels if r not in self._judged]
@@ -379,6 +419,34 @@ class KdsOcrClient:
     def has_screen_content(self) -> bool:
         """True while any ticket is open on the KDS, by kds-ocr's own reckoning."""
         return any(r not in self._judged for r in self._fifo)
+
+    @staticmethod
+    def _one_insertion(longer: str, shorter: str) -> bool:
+        """True when `longer` is `shorter` with exactly one extra character."""
+        if len(longer) != len(shorter) + 1:
+            return False
+        return any(longer[:i] + longer[i + 1:] == shorter
+                   for i in range(len(longer)))
+
+    def _duplicate_misread(self, ref: str, em) -> Optional[str]:
+        """The ref this one is a misread of, or None.
+
+        Requires BOTH tests: the reference is one inserted character longer than
+        a ref already queued, and the contents are byte-identical by
+        `signature` (codes, quantities, per-group counts and total dogs).
+        """
+        try:
+            sig = em.signature
+        except Exception:
+            return None
+        for known in self._queued:
+            if known == ref:
+                continue
+            if not self._one_insertion(ref, known):
+                continue
+            if self._signature.get(known) == sig:
+                return known
+        return None
 
     def _queue_card(self, ref: str) -> dict:
         """One ticket in the shape the dashboard's KDS panel already renders."""

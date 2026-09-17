@@ -1,5 +1,5 @@
 import json
-from collections import Counter
+from collections import Counter, deque
 from pathlib import Path
 from typing import List, Optional, Tuple
 
@@ -111,6 +111,22 @@ class OrderStateMachine:
         # the well-exit place event below is ignored, or every slice would be
         # counted twice.
         self.cheese_gate_owns_cheese: bool = False
+        #: Called with the ticket ref as an order closes, so the owner can drop
+        #: per-ticket state it holds (HotdogTracker.close_ticket). Set by main.
+        self._on_ticket_closed = None
+        #: Placements seen while no ticket was open. Bounded: this is a recent
+        #: window, not a log, and an unbounded one would replay the whole run
+        #: onto whichever ticket happened to open next.
+        self._pre_ticket_actions = deque(maxlen=400)
+        #: How far back a buffered placement may be credited to a ticket that
+        #: opens after it. Long enough to cover a ticket waiting its turn in the
+        #: FIFO, short enough that the PREVIOUS order's work is not replayed
+        #: onto this one.
+        self._pre_ticket_window_s: float = 90.0
+        #: Media time of the most recent action seen, ticket or no ticket. The
+        #: drain needs a "now" and runs from on_kds_ticket, which has no clock
+        #: of its own.
+        self._last_action_t: float = 0.0
 
         # Load history from JSONL file if it exists
         if history_path:
@@ -210,6 +226,48 @@ class OrderStateMachine:
         )
         return any(key in CHEESE_KEYS for key in required)
 
+    def _drain_pre_ticket_actions(self, now: float) -> int:
+        """Replay buffered placements onto the ticket that just opened.
+
+        Two guards keep this from inventing evidence:
+
+        * **the ticket must ask for it** -- an item this order does not require
+          is dropped rather than recorded as an extra, because a placement made
+          before the ticket existed is far more likely to belong to the order
+          before it than to be a genuine mistake on this one;
+        * **it must be recent** -- older than `_pre_ticket_window_s` and it is
+          someone else's work.
+
+        Eligible actions go back through `on_action`, so they meet exactly the
+        same debounce, serving-gap and granular rules as a live placement. They
+        are not credited by a second, looser path.
+        """
+        if not self._pre_ticket_actions or self.current_ticket is None:
+            return 0
+        pending = list(self._pre_ticket_actions)
+        self._pre_ticket_actions.clear()
+
+        required = set()
+        if self.batch_validator:
+            required = set(self.batch_validator.required_counts)
+        required |= CHEESE_KEYS   # cheese is judged by well, as elsewhere
+
+        applied = 0
+        for act in pending:
+            if now - act.timestamp > self._pre_ticket_window_s:
+                continue
+            if self._normalize(act.zone_name) not in required:
+                continue
+            if self.on_action(act) is not None:
+                applied += 1
+        if applied:
+            logger.info(
+                "ticket %s opened: replayed %d placement(s) made before it "
+                "reached the head of the queue",
+                self.current_order.ticket_id, applied,
+            )
+        return applied
+
     def apply_cheese_takes(self, takes, pre_confirmation: bool = False) -> int:
         """Record cheese slices confirmed out of the cheese region.
 
@@ -233,10 +291,24 @@ class OrderStateMachine:
         if self.current_ticket is None or self.current_order.status != OrderStatus.IN_PROGRESS:
             return 0
         if pre_confirmation and not self.requires_cheese():
+            # The slice most likely belongs to another order, so it must NOT
+            # satisfy anything here -- but dropping it without trace was hiding
+            # a real detection from the board, which is the one thing the
+            # dashboard is meant not to do.  Record it as an observed extra
+            # instead: extras are reported and never a fault
+            # (BatchOrderValidator.validate), so this shows the operator what
+            # the system saw without putting the order at risk.
+            for take in takes:
+                if self.batch_validator:
+                    self.batch_validator.on_place_event(take.item)
+                self.current_order.picked_counts[take.item] = (
+                    self.current_order.picked_counts.get(take.item, 0) + 1
+                )
             logger.info(
-                "Discarding %d pre-confirmation cheese take(s) -- ticket %s does "
-                "not ask for cheese, so the slice belongs to another order",
-                len(takes), self.current_order.ticket_id,
+                "Ticket %s does not ask for cheese: %d pre-confirmation cheese "
+                "take(s) recorded as observed extras, not credited to any "
+                "requirement",
+                self.current_order.ticket_id, len(takes),
             )
             return 0
 
@@ -365,6 +437,10 @@ class OrderStateMachine:
         
         # Initialize batch validator for the new ticket
         self.batch_validator = BatchOrderValidator(ticket, strict_no_extras=False)
+        # Before judging anything, take back the placements made while this
+        # ticket was still waiting its turn. Must run after batch_validator
+        # exists, because the replay only credits items this ticket requires.
+        self._drain_pre_ticket_actions(self._last_action_t)
         self.calculate_validation(self.current_order, is_final=False)
 
 
@@ -423,7 +499,29 @@ class OrderStateMachine:
         return canonical_ingredient(name)
 
     def on_action(self, action: Action) -> Optional[str]:
+        # Tracked even for dropped/buffered actions: it is the only clock the
+        # ticket-open path can use to age the buffer.
+        if action.timestamp and action.timestamp > self._last_action_t:
+            self._last_action_t = action.timestamp
+
         if self.current_ticket is None:
+            # Buffer, do not discard.  This `return None` used to be the end of
+            # the line for every placement made before a ticket reached the head
+            # of the queue -- which is most of them, because the crew starts
+            # building as soon as the order is called while the ticket still
+            # needs its agreeing OCR reads and its turn in the FIFO.
+            #
+            # CheesePreGate was written to rescue exactly one ingredient from
+            # this drop ("the one ingredient the order turns on is the one
+            # ingredient never recorded").  Every other ingredient was still
+            # being lost, which is why tickets finished with an empty
+            # `observed` against a full requirement while their hotdogs were
+            # recorded normally -- the hotdog path does not go through here.
+            #
+            # Replayed by _drain_pre_ticket_actions() when a ticket opens, and
+            # only onto a ticket that actually asks for the item.
+            if action.action_type in ("place", "sauce", "pickup"):
+                self._pre_ticket_actions.append(action)
             return None
 
         if self.current_order.status != OrderStatus.IN_PROGRESS:
@@ -641,6 +739,21 @@ class OrderStateMachine:
         # Save to file if history_path is set
         if self._history_path:
             self._append_order_to_file(self.current_order)
+
+        # Hotdog counting is PER TICKET. Everything else here is already cleared
+        # at the boundary; the hotdog records live in HotdogTracker, which this
+        # class does not own, so the owner registers a callback and the records
+        # bound to this ticket are retired with it. Without that the pool only
+        # grows and the next order can be credited with this order's dogs.
+        #
+        # It runs after validation and after the order is on `history`, so the
+        # verdict is decided on the full evidence and only the carry-over is cut.
+        _closed_ref = self.current_order.ticket_id
+        if self._on_ticket_closed is not None and _closed_ref:
+            try:
+                self._on_ticket_closed(_closed_ref)
+            except Exception:
+                logger.exception("ticket-close hook failed for %s", _closed_ref)
 
         # Clear current ticket/order so the next KDS poll picks up a new ticket
         self.current_ticket = None

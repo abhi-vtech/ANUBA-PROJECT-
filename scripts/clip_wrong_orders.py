@@ -66,7 +66,7 @@ def load_journeys(path: Path) -> list:
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--recording", help="the dashboard .mkv (default: newest in output/recordings)")
+    ap.add_argument("--recording", help="the dashboard .mp4 (default: newest in output/recordings)")
     ap.add_argument("--journeys", default=str(ROOT / "output" / "ticket_journeys.jsonl"))
     ap.add_argument("--out-dir", default=str(ROOT / "output" / "wrong_orders"))
     ap.add_argument("--keep-full", action="store_true",
@@ -82,11 +82,11 @@ def main(argv=None) -> int:
     if args.recording:
         recording = Path(args.recording)
     else:
-        mkvs = sorted(rec_dir.glob("*.mkv"), key=lambda p: p.stat().st_mtime)
-        if not mkvs:
+        recs = sorted(rec_dir.glob("*.mp4"), key=lambda p: p.stat().st_mtime)
+        if not recs:
             log("no recording found in %s" % rec_dir)
             return 1
-        recording = mkvs[-1]
+        recording = recs[-1]
     if not recording.exists():
         log("recording not found: %s" % recording)
         return 1
@@ -158,7 +158,7 @@ def main(argv=None) -> int:
             log("%s happened after the recording stopped; skipping" % ref)
             continue
         dur = max(1.0, end - start)
-        dest = out_dir / ("%s_%s.mkv" % (recording.stem, ref))
+        dest = out_dir / ("%s_%s.mp4" % (recording.stem, ref))
         cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
                "-ss", "%.3f" % start, "-i", str(recording),
                "-t", "%.3f" % dur, "-c", "copy", str(dest)]

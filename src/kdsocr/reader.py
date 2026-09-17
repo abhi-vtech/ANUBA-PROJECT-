@@ -58,6 +58,19 @@ class ReaderConfig:
     start_at: float = 0.0
     sample_interval: Optional[float] = None
     store_id: str = "6258"
+    #: REPLAY: consume an existing kds-ocr recipe stream instead of producing a
+    #: new one.  The KDS side is then byte-for-byte the same on every run, which
+    #: is what makes two vision runs comparable -- re-reading the screen each
+    #: time re-derives the tickets and moves the baseline underneath whatever
+    #: was being measured.  It also skips ~18 minutes of EasyOCR per run.
+    #:
+    #: The file must be a kds-ocr `recipes.jsonl`.  The goldset is NOT a
+    #: substitute: it stores raw ticket records (order_ref, items, item_count)
+    #: with no ingredient expansion, no `total_dogs` and no emission timing, and
+    #: it covers different business dates than any one production video -- so it
+    #: cannot pace against the kitchen footage at all.  It exists to SCORE the
+    #: OCR offline (kds-ocr/scripts/evaluate_gold.py), not to feed the pipeline.
+    replay: bool = False
     #: Interpreter for the child. Ours by default: it has easyocr and a working
     #: CUDA torch, so no separate environment is needed.
     python: str = ""
@@ -117,6 +130,22 @@ class KdsOcrReader:
         self._started_at = 0.0
 
     def start(self) -> None:
+        if self.config.replay:
+            # Nothing to launch: the recipe stream already exists and the
+            # tailer reads it from the start. Crucially do NOT rotate it --
+            # the rotation below exists to stop a stale file replaying, which
+            # is precisely what is wanted here.
+            recipes = Path(self.config.recipes_path)
+            if not recipes.is_file():
+                raise SystemExit(
+                    "KDS replay asked for but %s does not exist. Point "
+                    "KDS_RECIPES at a kds-ocr recipes.jsonl." % recipes
+                )
+            n = sum(1 for _ in recipes.open())
+            logger.info("kds-ocr REPLAY: reading %d emission(s) from %s; "
+                        "no OCR process started", n, recipes)
+            return
+
         repo = self.config.resolved_repo()
         if not (repo / "kds" / "cli.py").is_file():
             raise SystemExit(

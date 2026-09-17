@@ -140,38 +140,61 @@ class ExitDetector:
         wrapped_hotdog_ids: List[Any],
         frame_width: int = 1920,
         frame_height: int = 1080,
+        hotdog_boxes: Optional[List[Tuple[Any, Tuple[int, int, int, int]]]] = None,
     ) -> Optional[ExitEvent]:
-        """
-        Evaluates hand bounding boxes against exit line.
-        If a hand intersects the line and wrapped hotdogs exist, triggers an ExitEvent.
+        """Emit an exit when a WRAPPED HOTDOG crosses the line.
+
+        It used to be the hand that triggered this, and any hand crossing
+        committed EVERY wrapped hotdog at once:
+
+            for hand_bbox in hand_bboxes:            # a hand -- any hand
+                if _bbox_intersects_line(...):
+                    exited_ids = list(wrapped_hotdog_ids)   # all of them
+
+        A crew member reaching over the line for anything at all -- a wrapper, a
+        tray, the next order -- therefore reported the whole board as having
+        gone out.  The hand is not the thing leaving; the hotdog is.
+
+        `hotdog_boxes` is [(mono_id, bbox), ...] for hotdogs currently tracked.
+        Only an id that is BOTH wrapped and physically over the line exits, and
+        only that id -- so one dog going out reports one dog, not the board.
+
+        The hand is still tracked, but only to light up the tripwire overlay
+        (`is_active_crossing`); it no longer commits anything.
         """
         now = time.time()
         p1_px, p2_px = self.get_pixel_coords(frame_width, frame_height)
 
-        crossing_hand = None
-        for hand_bbox in hand_bboxes:
-            if _bbox_intersects_line(hand_bbox, p1_px, p2_px):
-                crossing_hand = hand_bbox
-                break
+        # Overlay state only. Deliberately does not gate the event below.
+        self.is_active_crossing = any(
+            _bbox_intersects_line(b, p1_px, p2_px) for b in (hand_bboxes or [])
+        )
 
-        if crossing_hand:
-            self.is_active_crossing = True
-            if now - self.last_exit_time >= self.exit_cooldown_s and len(wrapped_hotdog_ids) > 0:
-                self.last_exit_time = now
-                exited_ids = list(wrapped_hotdog_ids)
-                event = ExitEvent(
-                    timestamp=now,
-                    exited_hotdog_ids=exited_ids,
-                    hand_bbox=crossing_hand,
-                    message=f"Hand crossed exit line! Hotdogs exited: {exited_ids}",
-                )
-                self.exited_history.append(event)
-                logger.info(f"[ExitDetector] {event.message}")
-                return event
-        else:
-            self.is_active_crossing = False
+        if not hotdog_boxes:
+            return None
 
-        return None
+        wrapped = set(wrapped_hotdog_ids or [])
+        crossing_ids = [
+            hid for hid, box in hotdog_boxes
+            if hid in wrapped and _bbox_intersects_line(box, p1_px, p2_px)
+        ]
+        if not crossing_ids:
+            return None
+
+        if now - self.last_exit_time < self.exit_cooldown_s:
+            return None
+
+        self.last_exit_time = now
+        self.is_active_crossing = True
+        event = ExitEvent(
+            timestamp=now,
+            exited_hotdog_ids=crossing_ids,
+            hand_bbox=None,
+            message=f"Wrapped hotdog crossed the exit line: {crossing_ids}",
+        )
+        self.exited_history.append(event)
+        logger.info(f"[ExitDetector] {event.message}")
+        return event
 
     def draw_overlay(
         self,

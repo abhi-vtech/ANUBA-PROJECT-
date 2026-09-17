@@ -44,7 +44,35 @@ confidence_threshold: 0.5
 # that band is where other objects get called hotdogs.  0.75 drops the weakest
 # 6% of detections while keeping 94%; raise to 0.85 (keeps 87%) if false
 # positives persist.
-hotdog_conf_threshold: 0.75
+#
+# LOWERED 0.75 -> 0.55 on 2026-09-17.  The note above tunes against false
+# POSITIVES; the measured failure is the opposite.  Over a full hour (106,199
+# frames, 1,637 metric samples) only 165 samples -- about 10% -- contained any
+# hot-dog detection at all, and the tracker distilled the whole hour into 4
+# records.  hot-dog then appeared in 8 of 9 wrong verdicts because the count
+# was starved, not inflated.  Recall is the binding constraint, so the
+# 0.55-0.80 band is worth readmitting; the flicker it lets in is what
+# hotdog_min_track_age_s below is for.
+hotdog_conf_threshold: 0.55
+
+# How long a hotdog identity must have existed before it counts towards the
+# ticket.  Guards the hotdog count against sub-second false positives, which
+# used to count from their very first frame and then stick, because the count
+# only ever moves upward.
+#
+# This is the AGE of the track, not a continuous-visibility requirement: hands
+# cover the dog for long stretches during assembly, so demanding unbroken
+# presence would starve real hotdogs and fail correct orders -- the opposite and
+# worse error.
+#
+# RELAXED 0.6 -> 0.25 on 2026-09-17.  0.6 s was chosen against a signal assumed
+# to be dense.  It is not: hotdogs are detected in only ~10% of sampled frames,
+# so most tracks never live long enough to clear a 0.6 s bar and the gate became
+# a second cause of the undercount it was meant to sit alongside.  0.25 s is
+# ~7 frames at 30 fps -- still far more than the single-frame noise it exists to
+# reject, but survivable by a real track on an intermittent detection.
+hotdog_min_track_age_s: 0.25
+
 wrapping_conf_threshold: 0.15
 wrapping_dwell_s: 0.1                  # wrapping detection overlap required for "About to Complete" (seconds)
 wrapping_min_closing_frames: 30        # minimum frames "About to Complete" stays active (~1 second)

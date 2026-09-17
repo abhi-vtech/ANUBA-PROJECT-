@@ -1137,20 +1137,55 @@ class HotdogTracker:
             # Normal spawn path (distinct hotdogs get unique monotonic IDs)
             new_tid = None
             if expected_hotdogs is not None:
+                # Hotdog ids are drawn from the pool 1..expected_hotdogs, and a
+                # detection is DROPPED when the pool is exhausted.
+                #
+                # That pool must be scoped to the ticket being built. It used to
+                # be global: `used_ids` was collected from every record in the
+                # run, so once N hotdogs had ever been made, ids 1..N were spent
+                # permanently and every later detection hit the `continue` below
+                # and vanished -- no record, no count, no verdict evidence.
+                #
+                # Measured 2026-09-16: a full hour produced FOUR records, all on
+                # the first two tickets, while `hot-dog` was missing from 8 of
+                # the 9 wrong verdicts. Tickets later in the run were detected on
+                # screen and counted 0/N, because the pool had been used up by
+                # orders that finished minutes earlier.
+                #
+                # Per ticket, the pool refills: this order's slots belong to this
+                # order. Records from other tickets no longer occupy them, and
+                # close_ticket() retires this ticket's own when it ends.
                 used_ids = set()
                 for r in self._records.values():
-                    if str(r.hotdog_id).isdigit(): used_ids.add(int(r.hotdog_id))
+                    if getattr(r, 'order_id', None) != active_ticket_id:
+                        continue
+                    if str(r.hotdog_id).isdigit():
+                        used_ids.add(int(r.hotdog_id))
                 for r in self._retired_records.values():
+                    if getattr(r, 'order_id', None) != active_ticket_id:
+                        continue
                     if getattr(r, 'status', '') == 'done' and str(r.hotdog_id).isdigit():
                         used_ids.add(int(r.hotdog_id))
-                        
+
+                # `_records` is keyed by this id, so a slot that is free for
+                # THIS ticket but still held by a live record from another one
+                # would overwrite that record. Skip those here and fall back to
+                # a monotonic id below rather than dropping the detection: the
+                # cap exists to stop phantom hotdogs, not to discard real ones
+                # because of a key clash.
+                live_ids = {int(t) for t in self._records if isinstance(t, int)}
                 for i in range(1, expected_hotdogs + 1):
-                    if i not in used_ids:
+                    if i not in used_ids and i not in live_ids:
                         new_tid = i
                         break
-                        
+
                 if new_tid is None:
-                    continue  # Capped at expected_hotdogs, ignore spurious detection
+                    if len(used_ids) >= expected_hotdogs:
+                        # This ticket's slots really are all filled. Genuinely
+                        # spurious now -- the cap means what it says.
+                        continue
+                    new_tid = self._next_monotonic_id
+                    self._next_monotonic_id += 1
             else:
                 new_tid = self._next_monotonic_id
                 self._next_monotonic_id += 1
@@ -1909,6 +1944,34 @@ class HotdogTracker:
         pt = (float(cx), float(cy))
         result = cv2.pointPolygonTest(self._wrap_zone_poly, pt, False)
         return result >= 0
+
+    def close_ticket(self, ticket_id) -> int:
+        """Retire every record attributed to `ticket_id`. Returns how many.
+
+        Counting is PER TICKET.  A dog that belonged to an order which has been
+        bumped must not still be countable against the next one -- without this
+        the pool only ever grows, so the count carried across ticket boundaries
+        and a new order could be credited with the previous order's hotdogs
+        before the crew had touched it.
+
+        Deliberately NOT `reset()`: that wipes the whole tracker, including a
+        hotdog physically on the bench right now that belongs to the order being
+        built next.  Only records bound to the closing ticket are retired, so
+        in-flight work survives the boundary and stale attribution does not.
+        """
+        closing = [
+            tid for tid, rec in self._records.items()
+            if getattr(rec, "order_id", None) == ticket_id
+        ]
+        for tid in closing:
+            rec = self._records.pop(tid, None)
+            if rec is not None:
+                self._retired_records[tid] = rec
+            self._permanent_done_ids.add(tid)
+        if closing:
+            logger.info("ticket %s closed: retired %d hotdog record(s) so they "
+                        "cannot count towards the next order", ticket_id, len(closing))
+        return len(closing)
 
     def reset(self) -> None:
         self._records.clear()

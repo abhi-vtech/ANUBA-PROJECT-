@@ -548,11 +548,22 @@ def _draw_exit_line_overlays(
         if _mono is not None and _mono not in wrapped_mono_ids:
             wrapped_mono_ids.append(_mono)
 
+    # The hotdogs themselves, so the exit can be decided on the thing that is
+    # actually leaving rather than on a hand that happened to reach across.
+    _hd_boxes = []
+    for det in detections:
+        if det.class_name not in ("hot-dog", "wrapped") or det.track_id is None:
+            continue
+        _m = hotdog_tracker._detector_id_map.get(det.track_id, det.track_id)
+        if _m is not None:
+            _hd_boxes.append((_m, tuple(int(v) for v in det.bbox)))
+
     evt = _main_exit_detector.check_crossing(
         hand_bboxes=hand_bboxes,
         wrapped_hotdog_ids=wrapped_mono_ids,
         frame_width=w,
         frame_height=h,
+        hotdog_boxes=_hd_boxes,
     )
 
     if evt:
@@ -643,7 +654,10 @@ def main():
         "true",
         "yes",
     )
-    kds_mode = _env("KDS_MODE", config.get("kds_mode", "mock"))
+    # kds-ocr is the ONLY reader of the KDS screen. The default used to be
+    # "mock", so a missing config silently swapped the real ticket source for a
+    # synthetic one -- the KDS screen has one system reading it, and this is it.
+    kds_mode = _env("KDS_MODE", config.get("kds_mode", "kdsocr"))
 
     # Window of the recording to process.  START_AT_S seeks BOTH feeds to the
     # same media offset before the first frame is decoded, so the two videos
@@ -909,6 +923,7 @@ def main():
                 % kds_mode
             )
         _is_rtsp = str(kds_source).lower().startswith(("rtsp://", "rtsps://"))
+        _kds_replay = str(_env("KDS_RECIPES", "") or "").strip()
 
         # Anchor the KDS pacing on THIS video's wall-clock start, so the 1 s
         # difference between the two recordings does not become a standing
@@ -943,7 +958,14 @@ def main():
             live_seconds=float(_env("KDSOCR_LIVE_SECONDS",
                                     config.get("kdsocr_live_seconds", 0)) or 0),
             out_dir=config.get("kdsocr_out", "output/kdsocr"),
-            recipes_path=config.get("kdsocr_recipes", "output/kdsocr/recipes.jsonl"),
+            # KDS_RECIPES=<path> replays an existing kds-ocr recipe stream
+            # instead of reading the screen again. Same source either way --
+            # kds-ocr's own JSON -- but a replay is identical on every run, so
+            # a vision change can be measured against a KDS side that did not
+            # move underneath it.
+            recipes_path=(_kds_replay
+                          or config.get("kdsocr_recipes", "output/kdsocr/recipes.jsonl")),
+            replay=bool(_kds_replay),
             gpu=str(_env("KDSOCR_GPU", config.get("kdsocr_gpu", True))).lower()
                 not in ("false", "0", "no"),
             realtime=bool(realtime) or (not _is_rtsp and not _can_pace),
@@ -1162,6 +1184,26 @@ def main():
     # event or every slice is counted twice.
     state_machine.cheese_gate_owns_cheese = cheese_gate.enabled
 
+    # The hotdog COUNT comes from presence on the bench, not from tracked
+    # identities -- see src/analysis/hotdog_presence.py for why. HotdogTracker
+    # still runs for the trails, the wrapping states and item attribution.
+    from src.analysis.hotdog_presence import HotdogPresence
+
+    hotdog_presence = HotdogPresence(
+        match_px=float(_env("HOTDOG_MATCH_PX", config.get("hotdog_match_px", 140.0))),
+        grace_s=float(_env("HOTDOG_GRACE_S", config.get("hotdog_grace_s", 2.0))),
+        min_age_s=float(_env("HOTDOG_MIN_TRACK_AGE_S",
+                             config.get("hotdog_min_track_age_s", 0.25))),
+    )
+
+    def _close_ticket_state(ref):
+        # Both counters are per ticket: nothing from a finished order may be
+        # counted towards the next one.
+        hotdog_tracker.close_ticket(ref)
+        hotdog_presence.reset(None)
+
+    state_machine._on_ticket_closed = _close_ticket_state
+
     kds_image_cache = {}
 
     # Idle-mode tuning: how often to still run YOLO while the KDS is empty.
@@ -1246,6 +1288,11 @@ def main():
                             _updated.ticket_id,
                             state_machine.current_order.required_counts,
                         )
+                    else:
+                        # Not open yet (this loop takes updates BEFORE
+                        # get_next_ticket), or another ticket is being built.
+                        # Hold it rather than lose it -- see requeue_update.
+                        kdsocr.requeue_update(_updated.ticket_id)
 
                 # A ticket that stopped being verifiable after we opened it
                 # (voided, or every hot dog edited off it).  Released without a
@@ -2028,6 +2075,17 @@ def main():
                     # picked_counts["hot-dog"] is not -- that counts hotdogs
                     # seen, and two being visible satisfied a whole group
                     # fourteen seconds into the video.
+                    # Wrapping ends this hotdog's life on the bench. Retire its
+                    # presence slot so a dog built in the same spot right after
+                    # is counted as a new one -- a timer alone cannot tell
+                    # succession from occlusion, and this event can.
+                    _wrec = hotdog_tracker._records.get(_mono) or \
+                            hotdog_tracker._retired_records.get(_mono)
+                    _wbox = getattr(_wrec, "bbox", None) if _wrec else None
+                    if _wbox:
+                        hotdog_presence.close_at((_wbox[0] + _wbox[2]) / 2.0,
+                                                 (_wbox[1] + _wbox[3]) / 2.0)
+
                     if kdsocr is None and _mono is not None:
                         _mock_made_ids.add(_mono)
                     # Same evidence, recorded against the kds-ocr ticket: a
@@ -2045,12 +2103,76 @@ def main():
             if state_machine.current_ticket:
                 t_id = state_machine.current_ticket.ticket_id
                 exp_count = state_machine.current_ticket.total_hotdogs
+                # Count = hotdogs present on the bench for THIS ticket. Any
+                # detection either joins a slot or opens one, so a hotdog that
+                # is visible on the feed is counted -- which is the whole
+                # failure this replaces: the tracker drew ids from a run-wide
+                # pool of 1..expected and silently dropped every detection once
+                # that pool was spent, so plainly visible dogs read as 0/N.
+                if hotdog_presence._ticket != t_id:
+                    hotdog_presence.reset(t_id)
+                presence_count = hotdog_presence.update(
+                    [d.bbox for d in detections if d.class_name == "hot-dog"],
+                    current_time,
+                )
+
                 h_log = hotdog_tracker.get_hotdog_log()
+                # Two separate faults used to live in this list comprehension.
+                #
+                # FLICKER: a record counted from its very first frame, so an
+                # object mistaken for a hotdog for a fraction of a second became
+                # a hotdog -- and since the count below only ever moves upward,
+                # that phantom never went away.  Requiring the identity to have
+                # survived `hotdog_min_track_age_s` discards sub-second noise.
+                # It is an AGE test, not a continuous-visibility test, because
+                # hands cover the dog constantly during assembly -- the same
+                # reason wrap_station carries a 20 s occlusion buffer -- and a
+                # "must stay visible" rule would starve real hotdogs instead.
+                #
+                # MISSED: eligibility was `order_id == t_id or (active and
+                # order_id is None)`.  A hotdog still physically on the bench
+                # whose track had already been bound to an earlier ticket
+                # matched neither arm, so it was detected and drawn on the feed
+                # yet stayed permanently invisible to this ticket's checklist.
+                # A dog present NOW is being made now; the `min(_req_hd, ...)`
+                # cap below still prevents crediting more than the ticket asked.
+                _min_age = float(_env("HOTDOG_MIN_TRACK_AGE_S",
+                                      config.get("hotdog_min_track_age_s", 0.6)))
+
+                def _settled(rec):
+                    """True once this identity has existed for `_min_age`.
+
+                    `first_seen` is stamped with the same `current_time` the
+                    tracker is driven by (media time for a file), so this
+                    threshold means the same thing regardless of how fast the
+                    pipeline happens to be running.
+                    """
+                    first = rec.get("first_seen")
+                    if first is None:
+                        return False
+                    return (current_time - float(first)) >= _min_age
+
+                # Mine, or physically present and not yet claimed by anyone.
+                #
+                # An earlier attempt here counted ANY active record, to rescue
+                # hotdogs that were plainly on the feed yet bound to a previous
+                # ticket and therefore invisible to this one.  That widened the
+                # leak instead of closing it: the previous order's dogs could be
+                # credited to this one.  The boundary is the right place to fix
+                # it -- HotdogTracker.close_ticket() retires a ticket's records
+                # when it closes, so nothing stays bound to a finished order and
+                # this narrower rule no longer starves.
                 active_tracks = [
                     rec for rec in h_log.values()
-                    if rec.get("order_id") == t_id or (rec.get("active") and rec.get("order_id") is None)
+                    if _settled(rec)
+                    and (rec.get("order_id") == t_id
+                         or (rec.get("order_id") is None and rec.get("active")))
                 ]
-                vision_count = len(active_tracks)
+                # Presence is the count; the tracked-identity number is kept
+                # only as a floor, so a dog the tracker did see is never lost
+                # if presence somehow missed it. Neither can pull the other
+                # down -- both are per ticket and both only rise within one.
+                vision_count = max(presence_count, len(active_tracks))
                 # No over-count alert. `active_tracks` is inflated by track
                 # fragmentation -- one physical hotdog becomes several ids --
                 # so this fired on correct orders and meant nothing.

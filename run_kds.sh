@@ -162,7 +162,7 @@ if [ "$WINDOWS" = "1" ] || [ -x /usr/lib/xorg/Xorg ]; then
     # verdict, not just the detection overlay. The Jetson gets there through a
     # hidden Xorg and Firefox; Windows through Playwright and the installed
     # Chrome (scripts/record_dashboard_win.py). main.py picks the right one.
-    export RECORD_DASHBOARD="$REC_DIR/dashboard_$STAMP.mkv"
+    export RECORD_DASHBOARD="$REC_DIR/dashboard_$STAMP.mp4"
     RECORDING_NOTE="the dashboard window, trimmed at the end to
                output/wrong_orders/ -- WRONG orders only."
 else
@@ -170,7 +170,7 @@ else
     # recording off entirely instead of falling back to the default path.
     # Encoding every frame costs about a quarter of the loop rate, which is
     # worth skipping on a run wanted only for its verdicts.
-    export RECORD_VIDEO="${RECORD_VIDEO-$REC_DIR/annotated_$STAMP.mkv}"
+    export RECORD_VIDEO="${RECORD_VIDEO-$REC_DIR/annotated_$STAMP.mp4}"
     # nvv4l2h264enc is a Jetson part; asking for it here only buys a failed
     # probe before the OpenCV writer takes over anyway.
     export RECORD_ENCODER=opencv
