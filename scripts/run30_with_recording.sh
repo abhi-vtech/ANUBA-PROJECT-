@@ -32,8 +32,12 @@ PORT="${DASHBOARD_PORT:-8000}"
 STAMP="$(date +%Y%m%d_%H%M%S)"
 REC="output/recordings/dashboard_$STAMP.mp4"
 
-export KDS_SOURCE="Wienerschnitzel_Sacramento_CA_95818__kds__2026_09_06_11_to_12_PDT.mkv"
-export VIDEO_SOURCE="Wienerschnitzel_Sacramento_CA_95818__camA__2026_09_06_11_to_12_PDT.mkv"
+# Overridable so a different hour can be run without editing this file. Both
+# feeds must come from the SAME hour or the tickets no longer describe the food:
+#   KDS_SOURCE=..._kds__2026_09_13_12_to_13_p0007_PDT.mkv \
+#   VIDEO_SOURCE=..._camA__2026_09_13_12_to_13_p0006_PDT.mkv ./scripts/run30_with_recording.sh
+export KDS_SOURCE="${KDS_SOURCE:-Wienerschnitzel_Sacramento_CA_95818__kds__2026_09_06_11_to_12_PDT.mkv}"
+export VIDEO_SOURCE="${VIDEO_SOURCE:-Wienerschnitzel_Sacramento_CA_95818__camA__2026_09_06_11_to_12_PDT.mkv}"
 export KDS_MODE=kdsocr
 export RUN_FOR_S="${RUN_FOR_S:-3600}"
 export MAX_TICKETS=0
@@ -155,6 +159,11 @@ fi
 
 echo "[$(date +%T)] per-ticket report"
 $PY scripts/ticket_report.py --json output/ticket_report.json 2>&1 | tail -60
+
+if [ -n "${RECPID:-}" ]; then
+    echo "[$(date +%T)] seek index for the recording"
+    $PY scripts/recording_index.py --recording "$REC" 2>&1 | tail -40
+fi
 
 echo "[$(date +%T)] DONE"
 ls -la "$REC" "${REC%.mp4}.json" 2>/dev/null
