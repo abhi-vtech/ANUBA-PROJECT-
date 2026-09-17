@@ -148,6 +148,7 @@ class OrderStateMachine:
                                 picked_counts=record.get("picked_counts", {}),
                                 status=status,
                             )
+                            order.observed_hotdogs = record.get("observed_hotdogs", 0) or 0
                             order.passed = record.get("passed", True)
                             order.missing_items = record.get("missing_items", [])
                             order.extra_items = record.get("extra_items", [])
@@ -424,6 +425,7 @@ class OrderStateMachine:
             order.required_counts = dict(counts)
             order.status = OrderStatus.IN_PROGRESS
             order.picked_counts = {}
+            order.observed_hotdogs = 0
             order.applied_sauces = []  # Reset sauce state for new cycle
             order.passed = False
             order.missing_items = []
@@ -766,12 +768,18 @@ class OrderStateMachine:
 
         if self.batch_validator:
             if "hot-dog" in order.picked_counts:
-                self.batch_validator.observed_counts["hot-dog"] = order.picked_counts["hot-dog"]
+                # The VERDICT gets the true count, the checklist does not.
+                self.batch_validator.observed_counts["hot-dog"] = max(
+                    order.picked_counts["hot-dog"], order.observed_hotdogs
+                )
             result_dict = self.batch_validator.validate(is_final=is_final)
             
             # Sync back adjusted observed_counts to picked_counts so UI shows the forgiven amounts
             for ing, cnt in self.batch_validator.observed_counts.items():
-                if cnt > 0:
+                # hot-dog is excluded deliberately. The validator's copy is the
+                # UNCAPPED count (set just above), and syncing it back here
+                # would put it straight onto the checklist as 4/3.
+                if cnt > 0 and ing != "hot-dog":
                     order.picked_counts[ing] = cnt
                     
             order.passed = result_dict["passed"]
@@ -888,6 +896,7 @@ class OrderStateMachine:
             "result": result,
             "expected_items": order.expected_items,
             "picked_counts": order.picked_counts,
+            "observed_hotdogs": order.observed_hotdogs,
             "time": time_str,
         }
         if order.missing_items:

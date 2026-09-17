@@ -187,6 +187,13 @@ class Order:
     # so "picked + remaining" grows as the order is made.
     required_counts: Dict[str, int] = field(default_factory=dict)
     hotdog_count: int = 1
+    # How many hotdogs were actually SEEN being made, uncapped by the ticket.
+    # picked_counts["hot-dog"] cannot serve this purpose: it is clamped to
+    # required_counts so the checklist settles at 3/3 rather than flickering,
+    # which also makes an EXTRA hotdog structurally invisible there. This is
+    # the unclamped high-water mark, for telemetry and journeys -- the
+    # dashboard deliberately does not read it.
+    observed_hotdogs: int = 0
     passed: bool = False
     missing_items: List[str] = field(default_factory=list)
     extra_items: List[str] = field(default_factory=list)

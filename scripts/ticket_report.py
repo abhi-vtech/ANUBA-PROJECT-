@@ -22,6 +22,7 @@ rather than silently scored as correct.
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import json
 from collections import Counter
 from pathlib import Path
@@ -89,14 +90,55 @@ def required_and_added(journey: dict) -> tuple:
     return required, observed
 
 
+def hms(seconds) -> str:
+    if seconds is None:
+        return "-"
+    s = max(0, int(round(float(seconds))))
+    return "%02d:%02d:%02d" % (s // 3600, (s % 3600) // 60, s % 60)
+
+
+def recording_clock(journeys_path: Path):
+    """When the dashboard capture for this run began, as a unix timestamp.
+
+    `opened_at` in a journey is MEDIA time in the source video, which is not
+    where the ticket sits in recording.mp4 -- the capture starts when the run
+    starts, and a recorded run processes an hour of video over two hours of wall
+    clock. So the seek offset has to come from the wall stamps and the capture's
+    own start: `opened_wall - capture_start`.
+
+    Read from recording.json beside the journeys (the per-run layout), falling
+    back to the run directory's timestamp when the recorder never wrote a
+    sidecar -- flagged approximate, because the recorder starts a few seconds
+    after the directory is stamped.
+    """
+    side = journeys_path.parent / "recording.json"
+    if side.exists():
+        try:
+            meta = json.loads(side.read_text())
+            return dt.datetime.fromisoformat(meta["started"]).timestamp(), False
+        except (ValueError, KeyError):
+            pass
+    # output/runs/20260917_070247 -> 2026-09-17 07:02:47
+    name = journeys_path.parent.name
+    try:
+        return dt.datetime.strptime(name[-15:], "%Y%m%d_%H%M%S").timestamp(), True
+    except ValueError:
+        return None, False
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--journeys", default=str(ROOT / "output" / "ticket_journeys.jsonl"))
     ap.add_argument("--json", dest="json_out", default=None,
                     help="also write the whole report as JSON here")
+    ap.add_argument("--lead-in-s", type=float, default=5.0,
+                    help="seek this many seconds early so the ticket is already "
+                         "on screen when playback lands")
     args = ap.parse_args(argv)
 
-    journeys = load(Path(args.journeys))
+    jpath = Path(args.journeys)
+    journeys = load(jpath)
+    rec_start, rec_approx = recording_clock(jpath)
     report = []
     judged = wrong = correct = unjudged = 0
     tot_req = tot_added = tot_missing = tot_extra = 0
@@ -139,14 +181,29 @@ def main(argv=None) -> int:
             wrong += 0 if correct_flag else 1
             verdict = "CORRECT" if correct_flag else "WRONG"
 
+        # Where this ticket sits in recording.mp4 -- NOT opened_at, which is
+        # media time in the source video and unrelated to the capture.
+        seek_s = ends_s = None
+        if rec_start is not None and j.get("opened_wall"):
+            seek_s = max(0.0, float(j["opened_wall"]) - rec_start - args.lead_in_s)
+            if j.get("verdict_wall"):
+                ends_s = max(0.0, float(j["verdict_wall"]) - rec_start)
+
         entry = {
             "ticket_id": ticket,
             "verdict": verdict,
             "correct": correct_flag,
             "hotdogs_required": j.get("required_hotdogs"),
             "hotdogs_observed": j.get("observed_hotdogs"),
+            # media time in the SOURCE video
             "opened_at": j.get("opened_at"),
             "duration_s": j.get("duration_s"),
+            # offsets into recording.mp4, which is what you seek to
+            "recording_seek_s": round(seek_s, 1) if seek_s is not None else None,
+            "recording_seek": hms(seek_s) if seek_s is not None else None,
+            "recording_ends_s": round(ends_s, 1) if ends_s is not None else None,
+            "recording_ends": hms(ends_s) if ends_s is not None else None,
+            "recording_clock_approx": rec_approx if seek_s is not None else None,
             "message": j.get("message"),
             "items": rows,
         }
@@ -154,6 +211,9 @@ def main(argv=None) -> int:
 
         print("=" * 72)
         print(f"TICKET {ticket}    {verdict}")
+        if seek_s is not None:
+            print(f"  recording.mp4  seek {hms(seek_s)} -> {hms(ends_s)}"
+                  f"{'   (clock approximate)' if rec_approx else ''}")
         if j.get("duration_s") is not None:
             print(f"  duration {float(j['duration_s']):.1f}s")
         if entry["hotdogs_required"] is not None:

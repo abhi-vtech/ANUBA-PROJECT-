@@ -646,6 +646,8 @@ def main():
     )
     pick_dwell = _env("PICK_DWELL_MS", config.get("pick_dwell_ms", 800), int)
     place_dwell = _env("PLACE_DWELL_MS", config.get("place_dwell_ms", 500), int)
+    hotdog_confirm_frames = max(1, _env("HOTDOG_CONFIRM_FRAMES",
+                                        config.get("hotdog_confirm_frames", 5), int))
     frame_w = _env("FRAME_WIDTH", config.get("frame_width"), int)
     frame_h = _env("FRAME_HEIGHT", config.get("frame_height"), int)
     fps = _env("FPS", config.get("fps"), int)
@@ -666,6 +668,19 @@ def main():
     start_at_s = max(0.0, _env("START_AT_S", config.get("start_at_s", 0.0), float))
     run_for_s = max(0.0, _env("RUN_FOR_S", config.get("run_for_s", 0.0), float))
     stop_at_s = start_at_s + run_for_s if run_for_s > 0 else None
+
+    # A LIVE source has no media clock to measure against. These cameras stamp
+    # frames with an absolute presentation time, so `current_time` starts in the
+    # thousands and `current_time >= stop_at_s` is true on the very first frame:
+    # a 15-minute live run ended after 13 seconds. kds-ocr already knows this
+    # about streams ("CAP_PROP_POS_MSEC is 0 on a stream"), and the same applies
+    # here. So a live run is bounded on ELAPSED WALL TIME instead, which is what
+    # "run for 15 minutes" means when the source is the present.
+    _live_source = str(source).lower().startswith(("rtsp://", "rtsps://"))
+    _wall_deadline = (time.time() + run_for_s) if (_live_source and run_for_s > 0) else None
+    if _live_source:
+        logger.info("live source: bounding the run on wall time (%.0fs), not media time",
+                    run_for_s)
 
     metrics_interval = _env("LOG_METRICS_INTERVAL", 5, int)
 
@@ -1223,6 +1238,15 @@ def main():
     # Monotonic ids of hotdogs finished while the current mock group is on the
     # board.  Cleared when the group is handed over.
     _mock_made_ids: set = set()
+    # Hotdog counting, detector-only -- no track, no id, no re-identification.
+    # The last N per-frame detection counts, and the high-water mark each
+    # ticket reached.  A hotdog that was made stays made, so the mark rises
+    # and holds rather than following what is on screen right now.
+    _hotdog_frame_counts: deque = deque(maxlen=hotdog_confirm_frames)
+    #: [0] = the high-water count, [1-element lists so the loop can rebind them]
+    _hotdog_seen: list = [0]
+    #: Which ticket the mark above belongs to; a change resets the count.
+    _hotdog_count_ticket: list = [None]
 
     # Reports a silent stall instead of letting the run look merely slow.
     watchdog = _StallWatchdog(
@@ -1387,11 +1411,17 @@ def main():
             # exactly the requested stretch of the recording however fast or
             # slow the detector happened to be.  Open tickets are finalised
             # below rather than dropped, so nothing is silently lost.
-            if stop_at_s is not None and current_time >= stop_at_s:
+            _window_over = (
+                (_wall_deadline is not None and time.time() >= _wall_deadline)
+                if _live_source else
+                (stop_at_s is not None and current_time >= stop_at_s)
+            )
+            if _window_over:
                 logger.info(
-                    "Reached the end of the requested window: %.1fs -> %.1fs "
-                    "(%.1f minutes of video)",
-                    start_at_s, stop_at_s, (stop_at_s - start_at_s) / 60.0,
+                    "Reached the end of the requested window: %s",
+                    ("%.0f s of live feed" % run_for_s) if _live_source else
+                    ("%.1fs -> %.1fs (%.1f minutes of video)"
+                     % (start_at_s, stop_at_s, (stop_at_s - start_at_s) / 60.0)),
                 )
                 if state_machine.current_ticket is not None:
                     state_machine.finalize_current_order()
@@ -2103,79 +2133,46 @@ def main():
             if state_machine.current_ticket:
                 t_id = state_machine.current_ticket.ticket_id
                 exp_count = state_machine.current_ticket.total_hotdogs
-                # Count = hotdogs present on the bench for THIS ticket. Any
-                # detection either joins a slot or opens one, so a hotdog that
-                # is visible on the feed is counted -- which is the whole
-                # failure this replaces: the tracker drew ids from a run-wide
-                # pool of 1..expected and silently dropped every detection once
-                # that pool was spent, so plainly visible dogs read as 0/N.
-                if hotdog_presence._ticket != t_id:
-                    hotdog_presence.reset(t_id)
-                presence_count = hotdog_presence.update(
-                    [d.bbox for d in detections if d.class_name == "hot-dog"],
-                    current_time,
+                # A NEW ticket starts from zero.  Keyed on the ticket that
+                # owns the current mark rather than on the id alone, because
+                # check numbers come round again within a single service -- and
+                # an id-keyed mark would hand the new order the previous one's
+                # hotdogs.  Clearing the frame window too, so dogs still on the
+                # board from the last order cannot be confirmed into this one.
+                if t_id != _hotdog_count_ticket[0]:
+                    _hotdog_count_ticket[0] = t_id
+                    _hotdog_seen[0] = 0
+                    _hotdog_frame_counts.clear()
+
+                # How many hotdogs are on the board, counted WITHOUT any
+                # tracking: the number the DETECTOR reports in this frame,
+                # confirmed by persistence.  A hotdog that is really there is
+                # in many consecutive frames; a false positive is not.
+                _frame_hd = sum(1 for d in visible_detections
+                                if d.class_name == "hot-dog")
+                _hotdog_frame_counts.append(_frame_hd)
+                # MEDIAN of the window, not the minimum.  The detector drops a
+                # dog for the odd frame even while it sits on the board, and a
+                # minimum takes that single dropped frame as the truth -- which
+                # is how the count got stuck at 0 with hotdogs plainly visible.
+                # A median survives a minority of dropped frames and still
+                # refuses to promote a one-frame false positive.
+                _confirmed_hd = (
+                    sorted(_hotdog_frame_counts)[len(_hotdog_frame_counts) // 2]
+                    if len(_hotdog_frame_counts) == _hotdog_frame_counts.maxlen
+                    else 0
                 )
-
-                h_log = hotdog_tracker.get_hotdog_log()
-                # Two separate faults used to live in this list comprehension.
-                #
-                # FLICKER: a record counted from its very first frame, so an
-                # object mistaken for a hotdog for a fraction of a second became
-                # a hotdog -- and since the count below only ever moves upward,
-                # that phantom never went away.  Requiring the identity to have
-                # survived `hotdog_min_track_age_s` discards sub-second noise.
-                # It is an AGE test, not a continuous-visibility test, because
-                # hands cover the dog constantly during assembly -- the same
-                # reason wrap_station carries a 20 s occlusion buffer -- and a
-                # "must stay visible" rule would starve real hotdogs instead.
-                #
-                # MISSED: eligibility was `order_id == t_id or (active and
-                # order_id is None)`.  A hotdog still physically on the bench
-                # whose track had already been bound to an earlier ticket
-                # matched neither arm, so it was detected and drawn on the feed
-                # yet stayed permanently invisible to this ticket's checklist.
-                # A dog present NOW is being made now; the `min(_req_hd, ...)`
-                # cap below still prevents crediting more than the ticket asked.
-                _min_age = float(_env("HOTDOG_MIN_TRACK_AGE_S",
-                                      config.get("hotdog_min_track_age_s", 0.6)))
-
-                def _settled(rec):
-                    """True once this identity has existed for `_min_age`.
-
-                    `first_seen` is stamped with the same `current_time` the
-                    tracker is driven by (media time for a file), so this
-                    threshold means the same thing regardless of how fast the
-                    pipeline happens to be running.
-                    """
-                    first = rec.get("first_seen")
-                    if first is None:
-                        return False
-                    return (current_time - float(first)) >= _min_age
-
-                # Mine, or physically present and not yet claimed by anyone.
-                #
-                # An earlier attempt here counted ANY active record, to rescue
-                # hotdogs that were plainly on the feed yet bound to a previous
-                # ticket and therefore invisible to this one.  That widened the
-                # leak instead of closing it: the previous order's dogs could be
-                # credited to this one.  The boundary is the right place to fix
-                # it -- HotdogTracker.close_ticket() retires a ticket's records
-                # when it closes, so nothing stays bound to a finished order and
-                # this narrower rule no longer starves.
-                active_tracks = [
-                    rec for rec in h_log.values()
-                    if _settled(rec)
-                    and (rec.get("order_id") == t_id
-                         or (rec.get("order_id") is None and rec.get("active")))
-                ]
-                # Presence is the count; the tracked-identity number is kept
-                # only as a floor, so a dog the tracker did see is never lost
-                # if presence somehow missed it. Neither can pull the other
-                # down -- both are per ticket and both only rise within one.
-                vision_count = max(presence_count, len(active_tracks))
-                # No over-count alert. `active_tracks` is inflated by track
-                # fragmentation -- one physical hotdog becomes several ids --
-                # so this fired on correct orders and meant nothing.
+                # High-water mark within the ticket.  Hotdogs that were made do
+                # not become unmade when the crew carries them away, so the
+                # count rises and holds rather than following the board.
+                vision_count = max(_hotdog_seen[0], _confirmed_hd)
+                _hotdog_seen[0] = vision_count
+                # No over-count alert, and no tracked-identity count at all any
+                # more: the number above is the detector's, confirmed by
+                # persistence. HotdogTracker still runs, but for ingredient
+                # attribution and per-dog dedup (rec._committed_items) -- which
+                # is what stops one scoop of chilli counting twenty-four times
+                # -- not for counting dogs.
 
                 if state_machine.current_order:
                     # Arrival, not an exact count, and never allowed to fall.
@@ -2184,14 +2181,17 @@ def main():
                     # the checklist show 3/3 and then 1/3 on an order whose
                     # hotdogs had all been made. Capped at what the ticket
                     # asked for, so it settles there and stops.
+                    _order = state_machine.current_order
                     _req_hd = int(
-                        state_machine.current_order.required_counts.get(
-                            "hot-dog", exp_count) or exp_count
+                        _order.required_counts.get("hot-dog", exp_count) or exp_count
                     )
-                    _seen_hd = int(
-                        state_machine.current_order.picked_counts.get("hot-dog", 0)
-                    )
-                    state_machine.current_order.picked_counts["hot-dog"] = (
+                    _seen_hd = int(_order.picked_counts.get("hot-dog", 0))
+                    # The TRUE count, uncapped by the ticket. The verdict reads
+                    # this; the checklist reads the clamped value below, which
+                    # settles at 3/3 instead of flickering and therefore cannot
+                    # show an extra dog at all.
+                    _order.observed_hotdogs = max(_order.observed_hotdogs, vision_count)
+                    _order.picked_counts["hot-dog"] = (
                         min(_req_hd, max(_seen_hd, vision_count)) if _req_hd
                         else max(_seen_hd, vision_count)
                     )

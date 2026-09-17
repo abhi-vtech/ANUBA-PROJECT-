@@ -10,6 +10,10 @@ tracker_type: bytetrack
 pick_dwell_ms: 800   # how long (ms) a hand must be in the pick zone before we consider it a pick
 place_dwell_ms: 500
 hotdog_item_dwell_s: 0.5  # seconds an item must continuously overlap a hotdog before it is recorded as picked
+hotdog_confirm_frames: 5  # a hotdog must be detected in this many CONSECUTIVE frames
+                          # before it counts. The count is the per-frame detector count,
+                          # so no tracking or re-identification is involved; persistence
+                          # is what separates a real dog from a one-frame false positive.
 # Hand-presence gate: only commit a topping when a hand is simultaneously
 # detected over the hotdog.  Prevents the onion tray (statically near the
 # hotdog) from triggering false picks just because its bbox overlaps.

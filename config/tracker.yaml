@@ -22,7 +22,12 @@ match_thresh: 0.80
 fuse_score: True
 
 # BoT-SORT specifics
-gmc_method: sparseOptFlow
+# GMC (global motion compensation) is a BoT-SORT feature and does nothing
+# under bytetrack, so this is already inert -- but it is set to none rather
+# than deleted: Ultralytics DEFAULTS gmc_method to sparseOptFlow, so removing
+# the line would silently restore the ~34 ms/frame cost the moment anyone put
+# tracker_type back to botsort. Spelled out so that trap stays disarmed.
+gmc_method: none
 proximity_thresh: 0.5
 appearance_thresh: 0.75
 with_reid: False

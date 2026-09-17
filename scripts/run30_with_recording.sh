@@ -30,7 +30,17 @@ mkdir -p "$TMPDIR" "$CUDA_CACHE_PATH" output/recordings "$H/logs"
 PY=".venv/bin/python"
 PORT="${DASHBOARD_PORT:-8000}"
 STAMP="$(date +%Y%m%d_%H%M%S)"
-REC="output/recordings/dashboard_$STAMP.mp4"
+
+# One directory per run. Everything a run produces stays together -- the
+# capture, its sidecar, the seek index, the per-ticket clips and the report --
+# so two runs can never be told apart only by a timestamp buried in a filename,
+# and nothing from an earlier run is overwritten or mistaken for this one.
+# RUN_NAME gives the directory a name you choose (RUN_NAME=rtsp01), instead of
+# a timestamp nobody can match to a run later.
+RUN_DIR="output/runs/${RUN_NAME:-$STAMP}"
+mkdir -p "$RUN_DIR/wrong_orders"
+REC="$RUN_DIR/recording.mp4"
+echo "[$(date +%T)] run directory: $RUN_DIR"
 
 # Overridable so a different hour can be run without editing this file. Both
 # feeds must come from the SAME hour or the tickets no longer describe the food:
@@ -154,17 +164,39 @@ kill -0 "$PIPE" 2>/dev/null && kill -KILL "$PIPE" 2>/dev/null
 
 if [ -n "${RECPID:-}" ]; then
     echo "[$(date +%T)] cutting wrong-order clips"
-    $PY scripts/clip_wrong_orders.py --recording "$REC" --timebase wall --keep-full 2>&1 | tail -30
+    $PY scripts/clip_wrong_orders.py --recording "$REC" --timebase wall --keep-full \
+        --out-dir "$RUN_DIR/wrong_orders" 2>&1 | tail -30
 fi
 
 echo "[$(date +%T)] per-ticket report"
-$PY scripts/ticket_report.py --json output/ticket_report.json 2>&1 | tail -60
+$PY scripts/ticket_report.py --json "$RUN_DIR/ticket_report.json" 2>&1 | tail -60
 
 if [ -n "${RECPID:-}" ]; then
     echo "[$(date +%T)] seek index for the recording"
-    $PY scripts/recording_index.py --recording "$REC" 2>&1 | tail -40
+    $PY scripts/recording_index.py --recording "$REC" --out "$RUN_DIR/index.json" 2>&1 | tail -40
 fi
 
-echo "[$(date +%T)] DONE"
-ls -la "$REC" "${REC%.mp4}.json" 2>/dev/null
-ls -la output/wrong_orders/ 2>/dev/null | head -20
+# The journeys and the sources are what make a run re-readable months later.
+cp -f output/ticket_journeys.jsonl "$RUN_DIR/ticket_journeys.jsonl" 2>/dev/null
+cp -f "$H/logs/orchestrator.log" "$RUN_DIR/run.log" 2>/dev/null
+# An RTSP source carries credentials. Strip them before this touches disk --
+# run.json is committed-adjacent, copied around and read by anyone reviewing the
+# run, and a camera password has no business in it. Filenames pass through
+# unchanged; only a user:pass@ is removed.
+_redact() { printf '%s' "$1" | sed -E 's#(rtsps?://)[^@/]*@#\1***:***@#'; }
+cat > "$RUN_DIR/run.json" <<JSON
+{
+  "run_id": "${RUN_NAME:-$STAMP}",
+  "stamp": "$STAMP",
+  "kds_source": "$(_redact "$KDS_SOURCE")",
+  "video_source": "$(_redact "$VIDEO_SOURCE")",
+  "live": $(case "$KDS_SOURCE" in rtsp*) echo true;; *) echo false;; esac),
+  "run_for_s": $RUN_FOR_S,
+  "recorded": $([ -n "${RECPID:-}" ] && echo true || echo false),
+  "finished_at": "$(date -Is)"
+}
+JSON
+
+echo "[$(date +%T)] DONE — everything for this run is in $RUN_DIR"
+ls -la "$RUN_DIR" 2>/dev/null
+ls -la "$RUN_DIR/wrong_orders" 2>/dev/null | head -20
