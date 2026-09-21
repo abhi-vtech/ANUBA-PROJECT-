@@ -1,0 +1,163 @@
+source: videos/kds_3.mp4
+
+model_type: yolo-seg
+model_path: "rf_trained/weights (1).pt"
+secondary_model_path:        # disabled: models/weights.pt not present; run on primary model only
+tracker_type: bytetrack
+
+
+
+pick_dwell_ms: 800   # how long (ms) a hand must be in the pick zone before we consider it a pick
+place_dwell_ms: 500
+hotdog_item_dwell_s: 0.5  # seconds an item must continuously overlap a hotdog before it is recorded as picked
+hotdog_confirm_frames: 5  # a hotdog must be detected in this many CONSECUTIVE frames
+                          # before it counts. The count is the per-frame detector count,
+                          # so no tracking or re-identification is involved; persistence
+                          # is what separates a real dog from a one-frame false positive.
+# Hand-presence gate: only commit a topping when a hand is simultaneously
+# detected over the hotdog.  Prevents the onion tray (statically near the
+# hotdog) from triggering false picks just because its bbox overlaps.
+hotdog_require_hand_proximity: true  # set false to disable the gate entirely
+hotdog_hand_pad_px: 50               # extra px around hotdog bbox when checking for a hand
+# Sauce bottle shape filter — rejects wide/flat objects (lids, containers)
+# that the model misclassifies as ketchup_sauce / yellow_mustard_sauce.
+# A real bottle is tall & narrow: height/width ratio well above 1.
+hotdog_min_sauce_aspect_ratio: 0.8   # h/w minimum — allows tilted squeeze bottles during pouring
+hotdog_min_sauce_height_px: 30       # absolute minimum bbox height in pixels
+hotdog_min_sauce_confidence: 0.35    # confidence floor for sauce detections (lowered from 1.0)
+hotdog_max_sauce_instances: 1        # max ketchup/mustard detections per frame (keeps highest-confidence only)
+transition_timeout_ms: 2000
+max_speed: 2.0
+dedup_timeout_s: 0.3
+dedup_distance: 0.05
+frame_width: 1280
+frame_height: 720
+fps: 30
+# ── Jetson / GPU inference ───────────────────────────────────────────────────
+# half: FP16 inference.  Roughly doubles throughput on Orin's Ampere tensor
+# cores and is ignored automatically when CUDA is unavailable (torch has no
+# fp16 CPU kernels for most ops).  Override per run with HALF=false.
+half: true
+# imgsz: inference resolution fed to YOLO.  640 is the model's native training
+# size; lower it (e.g. 480) to trade accuracy for FPS on a loaded Jetson.
+imgsz: 640
+confidence_threshold: 0.5
+# Measured over 300 frames of the camA recording through the real Detector:
+# 144 hot-dog detections, 122 of them (85%) at >=0.90 -- a genuine hotdog is
+# detected with very high confidence.  Only ~12 sat in the 0.55-0.80 band, and
+# that band is where other objects get called hotdogs.  0.75 drops the weakest
+# 6% of detections while keeping 94%; raise to 0.85 (keeps 87%) if false
+# positives persist.
+#
+# LOWERED 0.75 -> 0.55 on 2026-09-17.  The note above tunes against false
+# POSITIVES; the measured failure is the opposite.  Over a full hour (106,199
+# frames, 1,637 metric samples) only 165 samples -- about 10% -- contained any
+# hot-dog detection at all, and the tracker distilled the whole hour into 4
+# records.  hot-dog then appeared in 8 of 9 wrong verdicts because the count
+# was starved, not inflated.  Recall is the binding constraint, so the
+# 0.55-0.80 band is worth readmitting; the flicker it lets in is what
+# hotdog_min_track_age_s below is for.
+hotdog_conf_threshold: 0.55
+
+# How long a hotdog identity must have existed before it counts towards the
+# ticket.  Guards the hotdog count against sub-second false positives, which
+# used to count from their very first frame and then stick, because the count
+# only ever moves upward.
+#
+# This is the AGE of the track, not a continuous-visibility requirement: hands
+# cover the dog for long stretches during assembly, so demanding unbroken
+# presence would starve real hotdogs and fail correct orders -- the opposite and
+# worse error.
+#
+# RELAXED 0.6 -> 0.25 on 2026-09-17.  0.6 s was chosen against a signal assumed
+# to be dense.  It is not: hotdogs are detected in only ~10% of sampled frames,
+# so most tracks never live long enough to clear a 0.6 s bar and the gate became
+# a second cause of the undercount it was meant to sit alongside.  0.25 s is
+# ~7 frames at 30 fps -- still far more than the single-frame noise it exists to
+# reject, but survivable by a real track on an intermittent detection.
+hotdog_min_track_age_s: 0.25
+
+wrapping_conf_threshold: 0.15
+wrapping_dwell_s: 0.1                  # wrapping detection overlap required for "About to Complete" (seconds)
+wrapping_min_closing_frames: 30        # minimum frames "About to Complete" stays active (~1 second)
+wrapping_done_delay_s: 1.0             # delay after hotdog becomes invisible before "Order Done" (seconds)
+kds_mode: kdsocr            # kdsocr | none
+#
+# kdsocr: the KDS screen is read by the kds-ocr project
+# (github.com/anuba-technologies/kds-ocr) running as a child process.  It
+# streams one JSON recipe per emission -- ticket appeared, items changed,
+# ticket bumped -- and src/kdsocr/ turns those into the build requirement,
+# updates it in place when the ticket changes, and judges the order when the
+# ticket is bumped.  There is no card-disappearance rule on this side: the
+# reader reports the bump explicitly.
+# Used when kds_mode: video (or override with KDS_SOURCE).
+#   videos/KDS_Feed/ -> the KDS screen recording
+#   videos/KDS/      -> the matching kitchen camera (set as `source:` above)
+kds_source: videos/KDS_Feed/Wienerschnitzel_Sacramento_CA_95818__kds__2026_09_06_11_to_12_PDT.mkv
+kds_timeline: output/kds_timeline.jsonl
+
+# ── kds-ocr reader ─────────────────────────────────────────────────────────
+kdsocr_repo: kds-ocr             # checkout of anuba-technologies/kds-ocr,
+                                 # kept inside the project
+kdsocr_out: output/kdsocr        # where the reader writes its run files
+kdsocr_recipes: output/kdsocr/recipes.jsonl   # the stream we consume
+kdsocr_log: output/kdsocr/reader.log          # the child's own (verbose) log
+# EasyOCR on the GPU.  Effectively mandatory: torch on this Orin is ~40x
+# slower on the CPU for this workload.
+kdsocr_gpu: true
+# Bound a live (RTSP) run so it finalizes like a finished video. 0 = unbounded.
+kdsocr_live_seconds: 0
+# kds-ocr ingredient name -> our zone/class name.  Leave unset for the default.
+# kdsocr_ingredients: config/kdsocr_ingredients.yaml
+
+# RECORD_DASHBOARD=<path>.mkv records the dashboard as a real browser window
+# (scripts/record_dashboard.py: hidden Xorg + Firefox kiosk + hardware H.264).
+
+# Every ticket's full journey -- requirement changes, what was observed going
+# on, and the verdict -- appended as one JSON object per judged ticket.
+ticket_journeys: output/ticket_journeys.jsonl
+
+# Record the dashboard view (production feed + KDS feed) for every ticket and
+# KEEP the clip only when that order ends up WRONG.  Correct orders are
+# recorded and then deleted, so the disk only ever holds failures.
+record_failures: true
+failure_clip_dir: output/failures
+failure_clip_fps: 10
+failure_clip_max_s: 3600       # safety cap per clip, in WALL seconds.
+                               # Not video seconds: the pipeline runs at ~7.5fps
+                               # on a 30fps source, so 900s of wall time was
+                               # only ~3.7 min of footage and cut long tickets
+                               # short.  Hitting the cap no longer implies a
+                               # verdict -- the clip is filed when the order is
+                               # actually judged, flagged "truncated".
+
+# Idle mode: 1 disables it -- detection runs on every frame regardless of what
+# the KDS screen shows.  Set >1 to run YOLO on 1 frame in N while the screen is
+# blank, or 0 to stop detection entirely while it is; either lets empty
+# stretches play through faster, at the cost of not seeing production that
+# starts before a ticket appears.
+idle_detect_stride: 1
+kds_poll: 2                 # seconds between ticket polls (mock mode)
+kds_history: output/orders.jsonl
+
+# ── Video input ──────────────────────────────────────────────────────────────
+# ingest: gstreamer decodes on the Jetson's hardware video decoder
+# (nvv4l2decoder, the element DeepStream is built on); opencv decodes on the
+# CPU.  gstreamer falls back to opencv by itself for sources it cannot handle
+# (camera indexes, codecs other than H.264/H.265).  Override with INGEST=.
+ingest: gstreamer
+# ── ONNX models ──────────────────────────────────────────────────────────────
+# Used when model_path is a .onnx file: tensorrt | cuda | cpu.  tensorrt builds
+# an FP16 engine the first time (~8 min on this Jetson) and caches it in
+# ort_trt_cache/ next to the model.  Override with ONNX_PROVIDER=.
+onnx_provider: tensorrt
+# ── Hotdog lifecycle on the dashboard (src/feed_analysis.py) ─────────────────
+# on counter -> wrapping -> wrapped -> outgoing
+lifecycle:
+  wrapping_cover_ratio: 0.5    # share of the hotdog a wrapper or clamshell must cover...
+  wrapping_dwell_s: 0.4        # ...for this long to count as wrapping
+  wrapped_same_place_s: 2.0    # clamshell: hotdog gone while the clamshell stays put this long
+  wrapped_same_place_px: 40    # ...within this many pixels of where it was
+  outgoing_cooldown_s: 2.0     # one hotdog goes out per touch of the exit line
+  outgoing_window_s: 120       # only hotdogs wrapped this recently can go out
+  lost_after_s: 10             # an unwrapped hotdog unseen this long leaves the live counts

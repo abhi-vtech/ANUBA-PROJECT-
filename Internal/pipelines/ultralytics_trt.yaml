@@ -1,0 +1,19 @@
+# Same analysis, TensorRT engine. Only the `model:` line differs from
+# ultralytics_pt.yaml -- no Python changes anywhere.
+source:
+  kind: ultralytics
+  video: videos/kds_3.mp4
+  model: "rf_trained/weights (1).engine"
+  conf: 0.5
+  detector:
+    model_type: yolo-seg
+    tracker_type: bytetrack
+zones: config/zones.json
+ticket:
+  json: config/kds_mock.json
+  index: 0
+engine:
+  dwell_s: 0.5
+extras:
+  advisory: true
+output: output/run_trt.json

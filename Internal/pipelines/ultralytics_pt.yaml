@@ -1,0 +1,18 @@
+# Baseline: PyTorch weights through the existing Detector.
+source:
+  kind: ultralytics
+  video: videos/kds_3.mp4
+  model: "rf_trained/weights (1).pt"
+  conf: 0.5
+  detector:
+    model_type: yolo-seg
+    tracker_type: bytetrack
+zones: config/zones.json
+ticket:
+  json: config/kds_mock.json
+  index: 0
+engine:
+  dwell_s: 0.5
+extras:
+  advisory: true
+output: output/run_pt.json

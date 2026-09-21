@@ -1,0 +1,88 @@
+Full-resolution instance masks -- the DeepStream equivalent of retina_masks=True.
+
+Apply inside NvDsInferParseYoloV11Seg in nvdsparsebbox_Yolo.cpp, replacing
+step 3's mask allocation (the block that does `float* mask = new float[mw*mh]`).
+
+Instead of handing nvdsosd the prototype-resolution crop, decode at prototype
+resolution and then bilinear-upsample to the object's own pixel size.
+
+--- before -------------------------------------------------------------
+        float* mask = new float[mw * mh];
+        for (int yy = 0; yy < mh; ++yy) {
+            for (int xx = 0; xx < mw; ++xx) {
+                ...
+                mask[yy * mw + xx] = 1.0f / (1.0f + std::exp(-acc));
+            }
+        }
+
+        NvDsInferInstanceMaskInfo obj{};
+        ...
+        obj.mask = mask;
+        obj.mask_width = mw;
+        obj.mask_height = mh;
+        obj.mask_size = mw * mh * sizeof(float);
+
+--- after --------------------------------------------------------------
+        // 3a. decode at prototype resolution into a scratch buffer
+        std::vector<float> lowres((size_t)mw * mh);
+        for (int yy = 0; yy < mh; ++yy) {
+            for (int xx = 0; xx < mw; ++xx) {
+                int py = py1 + yy, pxg = px1 + xx;
+                float acc = 0.0f;
+                for (int c = 0; c < maskCoeffs; ++c) {
+                    float coeff    = sc.coeffs[(size_t)c * numAnchors + sc.anchor];
+                    float protoVal = protoData[((size_t)c * protoH + py) * protoW + pxg];
+                    acc += coeff * protoVal;
+                }
+                lowres[(size_t)yy * mw + xx] = 1.0f / (1.0f + std::exp(-acc));
+            }
+        }
+
+        // 3b. upsample to the object's own size, so nvdsosd gets a mask at
+        //     object resolution rather than 1/4-resolution prototype cells.
+        //     Cap it: a huge box must not allocate a huge mask per frame.
+        const int MAX_DIM = 256;
+        int ow = std::min(MAX_DIM, std::max(1, (int)std::lround(sc.x2 - sc.x1)));
+        int oh = std::min(MAX_DIM, std::max(1, (int)std::lround(sc.y2 - sc.y1)));
+
+        float* mask = new float[(size_t)ow * oh];
+        for (int yy = 0; yy < oh; ++yy) {
+            // map destination centre back into source space
+            float fy = ((yy + 0.5f) * mh / (float)oh) - 0.5f;
+            int   y0 = (int)std::floor(fy);
+            float wy = fy - y0;
+            int   ya = clampVal((float)y0,     0.0f, (float)(mh - 1));
+            int   yb = clampVal((float)y0 + 1, 0.0f, (float)(mh - 1));
+            for (int xx = 0; xx < ow; ++xx) {
+                float fx = ((xx + 0.5f) * mw / (float)ow) - 0.5f;
+                int   x0 = (int)std::floor(fx);
+                float wx = fx - x0;
+                int   xa = clampVal((float)x0,     0.0f, (float)(mw - 1));
+                int   xb = clampVal((float)x0 + 1, 0.0f, (float)(mw - 1));
+                float top = lowres[(size_t)ya * mw + xa] * (1.0f - wx)
+                          + lowres[(size_t)ya * mw + xb] * wx;
+                float bot = lowres[(size_t)yb * mw + xa] * (1.0f - wx)
+                          + lowres[(size_t)yb * mw + xb] * wx;
+                mask[(size_t)yy * ow + xx] = top * (1.0f - wy) + bot * wy;
+            }
+        }
+
+        NvDsInferInstanceMaskInfo obj{};
+        ...
+        obj.mask = mask;
+        obj.mask_width = ow;
+        obj.mask_height = oh;
+        obj.mask_size = (size_t)ow * oh * sizeof(float);
+------------------------------------------------------------------------
+
+Notes
+
+* `mask` stays a `new float[]`; nvinfer copies it out (gstnvinfer_meta_utils.cpp
+  :209-215) and the parser's own buffer is released by the caller, so ownership
+  is unchanged by this patch.
+* MAX_DIM caps the per-object allocation. With it, a full-frame object costs
+  256*256*4 = 256 KB; without it a 1280x720 object would cost 3.5 MB per frame.
+* Rebuild inside the DeepStream container:
+      cd /work/deepstream_test/nvdsinfer_custom_impl_Yolo16 && make -B
+  then delete model.onnx_b1_gpu0_fp16.engine only if you also changed the
+  network -- a parser change does not invalidate the engine.

@@ -1,0 +1,23 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Python: Run Pipeline",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "src.main",
+      "cwd": "${workspaceFolder}/Internal",
+      "python": "${workspaceFolder}/Internal/.venv/Scripts/python.exe",
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "Python: Run pytest tests",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/Internal/.venv/Scripts/pytest.exe",
+      "cwd": "${workspaceFolder}/Internal",
+      "python": "${workspaceFolder}/Internal/.venv/Scripts/python.exe",
+      "console": "integratedTerminal"
+    }
+  ]
+}

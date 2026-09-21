@@ -1,0 +1,52 @@
+[property]
+gpu-id=0
+net-scale-factor=0.0039215697906911373
+model-color-format=0
+onnx-file=/work/deepstream_test/model.onnx
+model-engine-file=/work/deepstream_test/model.onnx_b1_gpu0_fp16.engine
+labelfile-path=/work/deepstream_test/labels.txt
+network-mode=2
+num-detected-classes=16
+gie-unique-id=1
+network-type=3
+maintain-aspect-ratio=0
+symmetric-padding=0
+scaling-filter=1
+# instance segmentation: our own parser does its own NMS (see box_iou/NMS
+# loop in nvdsparsebbox_Yolo.cpp), so nvinfer must not cluster again.
+cluster-mode=4
+output-instance-mask=1
+# Binarisation threshold for the instance mask.  nvinfer copies this into
+# NvOSD_MaskParams.threshold and nvdsosd fills every mask cell above it.
+# Unset it and the struct default of 0.0 applies -- our parser emits sigmoid
+# values, which are all strictly > 0, so every cell passes and each object
+# renders as a solid filled rectangle instead of a silhouette.
+segmentation-threshold=0.5
+parse-bbox-instance-mask-func-name=NvDsInferParseYoloV11Seg
+custom-lib-path=/work/deepstream_test/nvdsinfer_custom_impl_Yolo16/libnvdsinfer_custom_impl_Yolo.so
+crop-objects-to-roi-boundary=1
+
+[class-attrs-all]
+nms-iou-threshold=0.45
+pre-cluster-threshold=0.5
+topk=300
+
+# class 6 = hot-dog -> hotdog_conf_threshold in model.yaml.  Kept low here on
+# purpose: the host applies the real gate when it replays these detections, so
+# leaving headroom means the threshold can be retuned without re-running the
+# model over the whole video.
+[class-attrs-6]
+pre-cluster-threshold=0.40
+
+# wrapping-related classes -> wrapping_conf_threshold in model.yaml
+# 0=black_clamshell 3=closed_reg_clamshell 9=reg_clamshell 12=white_clamshell 14=wrapper
+[class-attrs-0]
+pre-cluster-threshold=0.15
+[class-attrs-3]
+pre-cluster-threshold=0.15
+[class-attrs-9]
+pre-cluster-threshold=0.15
+[class-attrs-12]
+pre-cluster-threshold=0.15
+[class-attrs-14]
+pre-cluster-threshold=0.15

@@ -1,0 +1,92 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+dist/
+wheels/
+*.egg-info
+.DS_Store
+
+# Virtual environments
+.venv
+.pytest_cache/
+.ruff_cache/
+__pypackages__/
+
+# Trained model weights (large, regenerable) + compiled engines
+*.pt
+*.mlpackage
+*.engine
+*.onnx
+weights/
+dataset_raw_frames/
+
+# Local-only paths
+docs/
+config/local.yaml
+*.ts
+.claude/
+.gitconfig-work
+.env
+
+# Video files (kept locally only, not pushed to repo)
+videos/
+*.mp4
+*.mkv
+Internal/input/
+Internal/output/
+
+# OS Metadata
+.DS_Store
+
+# Agent guidelines
+Internal/CLAUDE.md
+Internal/diff_output.txt
+
+# Log files and runtime outputs
+*.log
+Internal/logs/
+Internal/output/
+diff_output.txt
+scratch_*.txt
+
+# Compiler/build crash reports
+Internal/nuitka-crash-report*.xml
+
+# Scratch and temp files
+Internal/scratch/
+Internal/scratch_tracks.txt
+
+# Build infrastructure:
+# - Internal/build/build_nuitka.sh + run.sh + customer_readme.md → committed
+# - Internal/build/.nuitka/                       → scratch (Nuitka output)
+# - External/                                     → gitignored in full (assembled by build_nuitka.sh)
+Internal/build/.nuitka/
+External/
+
+# Nuitka's working directory is set to $TMPDIR/oad-nuitka-build to keep paths
+# short enough for macOS codesign. Uncomment to ignore a fixed location:
+# /tmp/oad-nuitka-build/
+
+# ---------------------------------------------------------------------------
+# Order-Accuracy: large local assets that must never reach the remote.
+# GitHub rejects any single file over 100 MB; videos/ alone is ~6.6 GB.
+# ---------------------------------------------------------------------------
+videos/
+output/
+_removed_*/
+.venv/
+*.mkv
+*.mp4
+*.avi
+
+# Model weights ARE tracked: the pipeline cannot run without them and the file
+# is 43 MB, comfortably under GitHub's 100 MB per-file limit.
+!rf_trained/*.pt
+
+# Local backups and run artifacts (added 2026-09-12)
+_archive/
+*.bak
+*.bak.*
+output/recordings/
+output/frames.jsonl
+*.jsonl

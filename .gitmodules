@@ -1,0 +1,3 @@
+[submodule "Internal/kds-ocr"]
+	path = Internal/kds-ocr
+	url = https://github.com/anuba-technologies/kds-ocr.git

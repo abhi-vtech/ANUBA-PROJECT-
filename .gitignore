@@ -1,0 +1,94 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+dist/
+wheels/
+*.egg-info
+.DS_Store
+
+# Virtual environments
+.venv
+.pytest_cache/
+.ruff_cache/
+__pypackages__/
+
+# Trained model weights (large, regenerable) + compiled engines
+*.pt
+*.mlpackage
+*.engine
+*.onnx
+weights/
+dataset_raw_frames/
+
+# Local-only paths
+docs/
+config/local.yaml
+*.ts
+.claude/
+.gitconfig-work
+.env
+
+# Video files (kept locally only, not pushed to repo)
+videos/
+*.mp4
+*.mkv
+Internal/input/
+Internal/output/
+
+# OS Metadata
+.DS_Store
+
+# Agent guidelines
+Internal/CLAUDE.md
+Internal/diff_output.txt
+
+# Log files and runtime outputs
+*.log
+Internal/logs/
+Internal/output/
+diff_output.txt
+scratch_*.txt
+
+# Compiler/build crash reports
+Internal/nuitka-crash-report*.xml
+
+# Scratch and temp files
+Internal/scratch/
+Internal/scratch_tracks.txt
+
+# Build infrastructure:
+# - Internal/build/build_nuitka.sh + run.sh + customer_readme.md → committed
+# - Internal/build/.nuitka/                       → scratch (Nuitka output)
+# - External/                                     → gitignored in full (assembled by build_nuitka.sh)
+Internal/build/.nuitka/
+External/
+
+# Nuitka's working directory is set to $TMPDIR/oad-nuitka-build to keep paths
+# short enough for macOS codesign. Uncomment to ignore a fixed location:
+# /tmp/oad-nuitka-build/
+
+# ---------------------------------------------------------------------------
+# Run artifacts: benchmark output, captured frames, generated reports.
+# Code in bench/ and deepstream_test/ IS tracked; what the runs produce is not.
+# ---------------------------------------------------------------------------
+Internal/bench/firefox_dashboard_profile/
+Internal/bench/logs/
+Internal/bench/results/
+Internal/bench/probe_results.txt
+Internal/bench/*.done
+
+Internal/deepstream_test/osd/
+Internal/deepstream_test/output0/
+Internal/deepstream_test/summary*.json
+Internal/deepstream_test/live_*.json
+Internal/deepstream_test/*.html
+Internal/deepstream_test/*.png
+Internal/deepstream_test/*.jpg
+Internal/deepstream_test/tegrastats.pid
+
+# Compiled output of the custom nvinfer parser (source is tracked).
+Internal/deepstream_test/nvdsinfer_custom_impl_Yolo16/*.o
+Internal/deepstream_test/nvdsinfer_custom_impl_Yolo16/*.so
+
+# Runtime state written by CartStateMachine each run, not source.
+Internal/config/cart_state.json

@@ -1,0 +1,19 @@
+# Same analysis again, DeepStream nvinfer. Runs ~3.7x faster; identical rules.
+source:
+  kind: deepstream
+  video: /work/deepstream_test/clip_1min_start.h264
+  labels: /work/deepstream_test/labels.txt
+  infer_config: /work/deepstream_test/config_infer.txt
+  tracker_lib: /opt/nvidia/deepstream/deepstream/lib/libnvds_nvmultiobjecttracker.so
+  tracker_config: /opt/nvidia/deepstream/deepstream-9.1/samples/configs/deepstream-app/config_tracker_IOU.yml
+  width: 1280
+  height: 720
+zones: config/zones.json
+ticket:
+  json: config/kds_mock.json
+  index: 0
+engine:
+  dwell_s: 0.5
+extras:
+  advisory: true
+output: output/run_deepstream.json
