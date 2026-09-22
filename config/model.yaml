@@ -1,7 +1,13 @@
 source: videos/kds_3.mp4
 
 model_type: yolo-seg
-model_path: "rf_trained/weights (1).pt"
+# TensorRT engine (scripts/export_tensorrt.py), FP16 @ imgsz 480 -- built for
+# THIS exact GPU/TensorRT/imgsz combo and not portable to another Jetson or a
+# different imgsz.  The .pt below is the portable source of truth; rebuild the
+# engine (a few minutes) after changing the model, imgsz, or JetPack/TensorRT
+# version.  Override per run with MODEL_PATH=.
+model_path: "rf_trained/weights (1).engine"
+# model_path: "rf_trained/weights (1).pt"   # source of truth / re-export from this
 secondary_model_path:        # disabled: models/weights.pt not present; run on primary model only
 tracker_type: bytetrack
 
@@ -39,8 +45,14 @@ fps: 30
 # fp16 CPU kernels for most ops).  Override per run with HALF=false.
 half: true
 # imgsz: inference resolution fed to YOLO.  640 is the model's native training
-# size; lower it (e.g. 480) to trade accuracy for FPS on a loaded Jetson.
-imgsz: 640
+# size.  LOWERED to 480 for throughput: measured detect_ms ~55-80ms at 640 vs
+# ~40-49ms at 480 on this device with the same TensorRT engine, a stride-32
+# valid step down (640 -> 480, 3/4 the linear resolution, ~9/16 the compute)
+# that keeps every existing class' confidence thresholds unchanged.  Revert to
+# 640 if recall on small/thin items (cheese slices, sauce streams) drops
+# enough to matter.  The TensorRT engine is rebuilt to match -- it has a fixed
+# input shape and is not portable across imgsz values.  Override with IMGSZ=.
+imgsz: 480
 confidence_threshold: 0.5
 # Measured over 300 frames of the camA recording through the real Detector:
 # 144 hot-dog detections, 122 of them (85%) at >=0.90 -- a genuine hotdog is

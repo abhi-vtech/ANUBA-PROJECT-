@@ -1,4 +1,5 @@
 import logging
+from pathlib import Path
 from typing import List, Optional
 
 import cv2
@@ -14,6 +15,31 @@ logger = logging.getLogger(__name__)
 
 # The ONNX graph in rf_trained/ is exported with dynamic=False at this size.
 _ONNX_EXPORT_IMGSZ = 640
+
+
+def _bytetrack_config_path() -> str:
+    """Path to config/tracker.yaml, after checking it actually selects ByteTrack.
+
+    Ultralytics reads the tracking ALGORITHM from THIS file's own
+    ``tracker_type`` field when ``model.track(tracker=...)`` is called with
+    its path -- config/model.yaml's `tracker_type` (the one Detector takes as
+    a constructor argument) never reaches Ultralytics at all, it only picks
+    DeepSort vs the built-in tracker below.  The two have drifted apart more
+    than once in this repo's history, and every time BoT-SORT won silently:
+    its sparseOptFlow global motion compensation cost ~34 ms/frame on this
+    footage for no measured accuracy gain.  Failing loudly here, once, at
+    startup means that class of regression can't come back quietly again --
+    it only supports ByteTrack, so anything else stops the run instead of
+    costing a third of the frame budget unnoticed.
+    """
+    path = resource("config/tracker.yaml")
+    declared = yaml.safe_load(Path(path).read_text()).get("tracker_type")
+    if declared != "bytetrack":
+        raise RuntimeError(
+            f"config/tracker.yaml sets tracker_type: {declared!r}. This "
+            "pipeline only supports ByteTrack -- set tracker_type: bytetrack."
+        )
+    return path
 
 
 def _task_for(model_type) -> str:
@@ -142,6 +168,9 @@ class Detector:
         self.prompt_classes = prompt_classes
         self.model_type = model_type
         self.tracker_type = tracker_type
+        # Resolved once and reused by every model.track() call below, rather
+        # than each one re-reading and re-validating config/tracker.yaml.
+        self._tracker_config_path = _bytetrack_config_path()
         # Per-class confidence overrides (additive — does not affect any
         # class not explicitly listed here).
         self.class_conf_overrides: dict = class_conf_overrides or {}
@@ -208,7 +237,7 @@ class Detector:
                 persist=True,
                 verbose=False,
                 conf=0.99,
-                tracker=resource("config/tracker.yaml"),
+                tracker=self._tracker_config_path,
                 device=self.device,
                 retina_masks=True,
                 **self._infer_kwargs,
@@ -257,7 +286,7 @@ class Detector:
             persist=True,
             verbose=False,
             conf=min_conf,
-            tracker=resource("config/tracker.yaml"),
+            tracker=self._tracker_config_path,
             device=self.device,
             retina_masks=True,  # User requested tight masks, this prevents low-res mask bleed
             **self._infer_kwargs,
@@ -312,7 +341,7 @@ class Detector:
                 frame,
                 persist=True,
                 verbose=False,
-                tracker=resource("config/tracker.yaml"),
+                tracker=self._tracker_config_path,
                 device=self.device,
                 **self._infer_kwargs,
             )

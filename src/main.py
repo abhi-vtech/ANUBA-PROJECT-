@@ -390,17 +390,10 @@ def draw_annotations(frame, detections, zones, current_order):
     
     # (System ROI drawing removed per user request)───────────────────────────────────────────────────────────────────────
     
-    # Only the ROIs THIS ticket needs.  Drawing all twenty bins labelled every
-    # frame buried the two or three the crew actually has to touch, and a zone
-    # the ticket never mentions is one the pipeline already refuses to credit
-    # (see the required_counts gate in OrderStateMachine.on_action).  Non-bin
-    # zones -- assembly, the sauce vessel, the cheese region -- are always
-    # drawn: they are the workspace, not ingredients.
-    _required = set((getattr(current_order, "required_counts", None) or {}))
+    # Every ROI, continuously -- regardless of ticket state.  Previously bin
+    # zones were filtered down to just what the current ticket required, which
+    # made boxes appear/disappear as tickets changed; drawn unconditionally now.
     for zone in zones.get_all():
-        if zone.zone_type == "bin" and _required:
-            if canonical_ingredient(zone.name) not in _required:
-                continue
         poly = [(int(p[0] * w), int(p[1] * h)) for p in zone.polygon]
         color = hex_to_bgr(zone.color)
         cv2.polylines(frame, [np.array(poly)], True, color, 2)
@@ -429,6 +422,40 @@ def draw_annotations(frame, detections, zones, current_order):
 
     hotdog_log = getattr(draw_annotations, "_hotdog_log_ref", {})
 
+    # ── Pass 1: fill every detection's mask, one frame copy per alpha group ──
+    # fillPoly/addWeighted touch the whole frame buffer no matter how small the
+    # shape is, so doing that once per DETECTION (as before) meant copying an
+    # entire 720p frame up to once per object on screen.  There are only two
+    # fill styles in use here -- the hotdog orange at 0.30 and everything else
+    # at 0.25 -- so one overlay per style, with every matching polygon painted
+    # onto it before the single blend, gets the same look for a constant cost
+    # instead of one that grows with the detection count.
+    seg_color = (0, 140, 255)   # Vibrant orange (BGR)
+    hotdog_fill_alpha = 0.30
+    other_fill_alpha = 0.25
+    hotdog_polys = []
+    other_polys = []  # (pts, color) — colors differ per class, fillPoly per pair
+    for det in detections:
+        poly = getattr(det, "polygon", None)
+        if poly is None or len(poly) < 3:
+            continue
+        pts = np.array(poly, dtype=np.int32)
+        if det.class_name in ("hot-dog", "wrapped"):
+            hotdog_polys.append(pts)
+        else:
+            other_polys.append((pts, CLASS_COLORS.get(det.class_name, DEFAULT_BBOX_COLOR)))
+
+    if hotdog_polys:
+        overlay = frame.copy()
+        cv2.fillPoly(overlay, hotdog_polys, seg_color)
+        cv2.addWeighted(overlay, hotdog_fill_alpha, frame, 1.0 - hotdog_fill_alpha, 0, frame)
+    if other_polys:
+        overlay = frame.copy()
+        for pts, color in other_polys:
+            cv2.fillPoly(overlay, [pts], color)
+        cv2.addWeighted(overlay, other_fill_alpha, frame, 1.0 - other_fill_alpha, 0, frame)
+
+    # ── Pass 2: contours, labels, center dots — cheap, in-place, no copies ───
     for det in detections:
         x1, y1, x2, y2 = det.bbox
         color = CLASS_COLORS.get(det.class_name, DEFAULT_BBOX_COLOR)
@@ -438,17 +465,9 @@ def draw_annotations(frame, detections, zones, current_order):
         if det.class_name in ("hot-dog", "wrapped"):
             label_text = "Hotdog"
 
-            # ── Draw filled segmentation mask + orange contour (no bounding box) ──
-            seg_color   = (0, 140, 255)   # Vibrant orange (BGR)
-            fill_alpha  = 0.30
-
             if has_poly:
                 pts = np.array(poly, dtype=np.int32)
-                # Semi-transparent fill
-                overlay = frame.copy()
-                cv2.fillPoly(overlay, [pts], seg_color)
-                cv2.addWeighted(overlay, fill_alpha, frame, 1.0 - fill_alpha, 0, frame)
-                # Solid contour
+                # Solid contour (fill already applied in the pass above)
                 cv2.polylines(frame, [pts], isClosed=True, color=seg_color, thickness=2)
 
             font = cv2.FONT_HERSHEY_SIMPLEX
@@ -471,13 +490,9 @@ def draw_annotations(frame, detections, zones, current_order):
                 thickness,
             )
         else:
-            # ── All other classes: filled mask + colored contour ──────────────
-            fill_alpha = 0.25
+            # ── All other classes: colored contour (fill already applied) ─────
             if has_poly:
                 pts = np.array(poly, dtype=np.int32)
-                overlay = frame.copy()
-                cv2.fillPoly(overlay, [pts], color)
-                cv2.addWeighted(overlay, fill_alpha, frame, 1.0 - fill_alpha, 0, frame)
                 cv2.polylines(frame, [pts], isClosed=True, color=color, thickness=2)
 
             label_text = det.class_name
@@ -640,7 +655,7 @@ def main():
     source = _env("VIDEO_SOURCE") or config["source"]
     model_path = _env("MODEL_PATH") or config.get("model_path", "yolov8n.pt")
     model_type = _env("MODEL_TYPE") or config.get("model_type", "yolo")
-    tracker_type = _env("TRACKER_TYPE") or config.get("tracker_type", "botsort")
+    tracker_type = _env("TRACKER_TYPE") or config.get("tracker_type", "bytetrack")
     confidence = _env(
         "CONFIDENCE_THRESHOLD", config.get("confidence_threshold", 0.5), float
     )
@@ -754,6 +769,12 @@ def main():
         "hot-dog": float(_env("HOTDOG_CONF_THRESHOLD",
                               config.get("hotdog_conf_threshold", 0.55))),
         "knife": 0.80,
+        # Loosened from the base confidence_threshold (0.5): grated cheese is
+        # thin, often partly hand-covered while it's picked, and was getting
+        # missed at the general threshold the same way hot-dog recall was
+        # (see hotdog_conf_threshold above) before that one was lowered.
+        "grated_yellow_cheese": float(_env("CHEESE_CONF_THRESHOLD",
+                                           config.get("grated_yellow_cheese_conf_threshold", 0.35))),
     }
 
     # DEEPSTREAM_DETECTIONS=<file.jsonl> replays detections produced by
@@ -1192,6 +1213,8 @@ def main():
         # real case, a slice fetched while the ticket was still coming up the
         # queue, without reaching into the order before it.
         lookback_s=float(_env("CHEESE_LOOKBACK_S", config.get("cheese_lookback_s", 30.0))),
+        min_well_frames=int(_env("CHEESE_MIN_WELL_FRAMES",
+                                 config.get("cheese_min_well_frames", 1))),
         enabled=str(_env("CHEESE_GATE", config.get("cheese_gate", True))).lower()
         not in ("false", "0", "no"),
     )

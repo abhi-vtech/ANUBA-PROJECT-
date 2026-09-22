@@ -50,9 +50,11 @@ CHEESE_KEYS: frozenset = frozenset(
 )
 
 #: Consecutive frames the fingertip must sit in a cheese well before the hand
-#: counts as holding a slice.  Matches ``_MIN_BIN_FRAMES`` in temporal.py, and
-#: the ``min_frames = 2`` that file already special-cases for cheese.
-_MIN_WELL_FRAMES: int = 2
+#: counts as holding a slice.  LOOSENED 2 -> 1: workers reach for cheese fast
+#: (see the module docstring) and a quick touch-and-go in the well was
+#: arming on frame 2 or never at all if the dwell was that brief, which is
+#: the same missed-slice complaint hotdog_conf_threshold was lowered for.
+_MIN_WELL_FRAMES: int = 1
 
 #: Consecutive frames the fingertip must be outside the region before the carry
 #: is believed.  Two frames rather than one so a bbox that jitters across the
